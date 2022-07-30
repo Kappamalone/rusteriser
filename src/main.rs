@@ -114,9 +114,10 @@ impl Rasteriser {
     }
 
     fn draw_pixel(&mut self, x: i32, y: i32, color: u32) {
-        // this performs a horizontal and vertical flip on our position to account for the way the
-        // framebuffer is layed out in memory
-        let coord = (self.width * self.height) - ((self.width - x) + y * self.width);
+        // this performs a horizontal and vertical flip on our pixel position
+        // to account for the way the framebuffer is layed out in memory
+        // HACK: cause of cgmath::perspective, don't y flip
+        let coord = (self.width - x) + y * self.width;
         // TODO: ...line clipping?
         if coord >= self.width * self.height || coord < 0 {
             return;
@@ -163,17 +164,26 @@ impl Rasteriser {
                                                     0.,1.,0.,0.,
                                                     -Deg::sin(angle),0.,Deg::cos(angle),0.,
                                                     0.,0.,0.,1.,);
+
+        let projection_matrix = cgmath::perspective(
+            cgmath::Deg(90.),
+            (self.width / self.height) as f32,
+            0.1,
+            100.,
+        );
         #[rustfmt::skip]
-        let test_matrix = cgmath::Matrix4::new( 1.,0.,0.,0.,
+        let viewport_matrix = cgmath::Matrix4::new( 1.,0.,0.,0.,
                                                 0.,1.,0.,0.,
                                                 0.,0.,1.,0.,
-                                                3.5,2.5,0.,1.,);
+                                                0.,-3.5,6.5, 1.,);
         for i in tris.iter_mut() {
-            *i = cgmath::Point3::<f32>::from_homogeneous(test_matrix * (*i).to_homogeneous());
+            *i = cgmath::Point3::<f32>::from_homogeneous(
+                projection_matrix * rotation_matrix * viewport_matrix * (*i).to_homogeneous(),
+            );
         }
 
         let c0 = 1.;
-        let c1 = 8.;
+        let c1 = 2.;
         let x0 = ((tris[0].x + c0) * self.width as f32 / c1).round() as i32;
         let x1 = ((tris[1].x + c0) * self.width as f32 / c1).round() as i32;
         let x2 = ((tris[2].x + c0) * self.width as f32 / c1).round() as i32;
