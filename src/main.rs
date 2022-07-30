@@ -114,9 +114,9 @@ impl Rasteriser {
     }
 
     fn draw_pixel(&mut self, x: i32, y: i32, color: u32) {
-        // TODO: use projections to not have to invert manually to account for origin being bottom
-        // left instead of top left
-        let coord = (self.width * self.height) - (x + y * self.width);
+        // this performs a horizontal and vertical flip on our position to account for the way the
+        // framebuffer is layed out in memory
+        let coord = (self.width * self.height) - ((self.width - x) + y * self.width);
         // TODO: ...line clipping?
         if coord >= self.width * self.height || coord < 0 {
             return;
@@ -163,22 +163,17 @@ impl Rasteriser {
                                                     0.,1.,0.,0.,
                                                     -Deg::sin(angle),0.,Deg::cos(angle),0.,
                                                     0.,0.,0.,1.,);
-        // x axis: + is left, - is right
-        // y axis: + is up, - is down
-        // z axis:
         #[rustfmt::skip]
         let test_matrix = cgmath::Matrix4::new( 1.,0.,0.,0.,
                                                 0.,1.,0.,0.,
                                                 0.,0.,1.,0.,
-                                                0.,0.,0.,1.,);
+                                                3.5,2.5,0.,1.,);
         for i in tris.iter_mut() {
-            *i = cgmath::Point3::<f32>::from_homogeneous(
-                test_matrix * rotation_matrix * (*i).to_homogeneous(),
-            );
+            *i = cgmath::Point3::<f32>::from_homogeneous(test_matrix * (*i).to_homogeneous());
         }
 
         let c0 = 1.;
-        let c1 = 2.;
+        let c1 = 8.;
         let x0 = ((tris[0].x + c0) * self.width as f32 / c1).round() as i32;
         let x1 = ((tris[1].x + c0) * self.width as f32 / c1).round() as i32;
         let x2 = ((tris[2].x + c0) * self.width as f32 / c1).round() as i32;
@@ -229,7 +224,7 @@ fn main() {
     // Limit to max ~60 fps update rate
     r.window
         .limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-    let model = ObjData::new("./models/african_head.obj");
+    let model = ObjData::new("./models/teapot.obj");
     let mut degrees = 0.;
 
     while r.window.is_open() && !r.window.is_key_down(Key::Escape) {
