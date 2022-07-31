@@ -5,7 +5,6 @@ extern crate minifb;
 // TODO: look into clipping
 // TODO: tidy up project into different files
 // TODO: egui?
-
 use cgmath::perspective;
 use cgmath::point2;
 use cgmath::point3;
@@ -15,6 +14,7 @@ use cgmath::Deg;
 use cgmath::Point2;
 use cgmath::Point3;
 use minifb::{Key, Window, WindowOptions};
+use rand::Rng;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -243,11 +243,14 @@ impl Rasteriser {
             }
             TriangleShading::Flat => {
                 //TODO: unsafe unwrap?
-                fn orient_2d(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> i32 {
-                    (b.x as i32 - a.x as i32) * (c.y as i32 - a.y as i32)
-                        - (b.y as i32 - a.y as i32) * (c.x as i32 - a.x as i32)
+                let mut rng = rand::thread_rng();
+                let color = rng.gen_range(0..=0xffffff);
+
+                fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
+                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
+                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
+                        >= 0
                 }
-                points.sort_by(|a, b| a.y.cmp(&b.y));
                 // Computes triangle bounding box and clips against screen bounds
                 let min_x = std::cmp::max(0, points.iter().min_by_key(|p| p.x).unwrap().x);
                 let min_y = std::cmp::max(0, points.iter().min_by_key(|p| p.y).unwrap().y);
@@ -257,19 +260,19 @@ impl Rasteriser {
                     self.height - 1,
                     points.iter().max_by_key(|p| p.y).unwrap().y,
                 );
-                let mut p = point2::<usize>(min_x, min_y);
-                while p.y <= max_y {
-                    while p.x <= max_x {
-                        let w0 = orient_2d(points[1], points[2], p);
-                        let w1 = orient_2d(points[2], points[0], p);
-                        let w2 = orient_2d(points[0], points[1], p);
-                        if w0 >= 0 && w1 >= 0 && w2 >= 0 {
+                let mut p = cgmath::point2(0, 0);
+                for y in min_y..=max_y {
+                    for x in min_x..=max_x {
+                        p.x = x;
+                        p.y = y;
+                        let mut inside = true;
+                        inside &= edge(points[0], points[1], p);
+                        inside &= edge(points[1], points[2], p);
+                        inside &= edge(points[2], points[0], p);
+                        if inside {
                             self.draw_pixel(p, color);
                         }
-                        p.x += 1;
                     }
-                    p.y += 1;
-                    p.x = min_x;
                 }
             }
         }
@@ -323,7 +326,6 @@ fn main() {
                     translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                 );
             }
-            r.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
             r.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
         }
         angle += 1.5;
