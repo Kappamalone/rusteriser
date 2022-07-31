@@ -195,7 +195,7 @@ impl Rasteriser {
         tri[2].y = (tri[2].y + c0) * self.width as f32 / c1;
 
         //FIXME: floor floats?
-        let points: [ScreenPoint; 3] = [
+        let mut points: [ScreenPoint; 3] = [
             point2::<usize>(tri[0].x as usize, tri[0].y as usize),
             point2::<usize>(tri[1].x as usize, tri[1].y as usize),
             point2::<usize>(tri[2].x as usize, tri[2].y as usize),
@@ -210,24 +210,33 @@ impl Rasteriser {
         let tri[2].y = tri[2].y as i32;
         */
 
-        // TODO: something something clip space
-        if (points[0].x >= self.width)
-            || (points[0].y >= self.height)
-            || (points[1].x >= self.width)
-            || (points[1].y >= self.height)
-            || (points[2].x >= self.width)
-            || (points[2].y >= self.height)
-        {
-            return;
-        }
-
         match triangle_type {
             TriangleShading::Points => {
+                // TODO: something something clip space
+                if (points[0].x >= self.width)
+                    || (points[0].y >= self.height)
+                    || (points[1].x >= self.width)
+                    || (points[1].y >= self.height)
+                    || (points[2].x >= self.width)
+                    || (points[2].y >= self.height)
+                {
+                    return;
+                }
                 self.draw_pixel(points[0], color);
                 self.draw_pixel(points[1], color);
                 self.draw_pixel(points[2], color);
             }
             TriangleShading::Wireframe => {
+                // TODO: something something clip space
+                if (points[0].x >= self.width)
+                    || (points[0].y >= self.height)
+                    || (points[1].x >= self.width)
+                    || (points[1].y >= self.height)
+                    || (points[2].x >= self.width)
+                    || (points[2].y >= self.height)
+                {
+                    return;
+                }
                 self.draw_line(points[0], points[1], color);
                 self.draw_line(points[1], points[2], color);
                 self.draw_line(points[2], points[0], color);
@@ -238,6 +247,7 @@ impl Rasteriser {
                     (b.x as i32 - a.x as i32) * (c.y as i32 - a.y as i32)
                         - (b.y as i32 - a.y as i32) * (c.x as i32 - a.x as i32)
                 }
+                points.sort_by(|a, b| a.y.cmp(&b.y));
                 // Computes triangle bounding box and clips against screen bounds
                 let min_x = std::cmp::max(0, points.iter().min_by_key(|p| p.x).unwrap().x);
                 let min_y = std::cmp::max(0, points.iter().min_by_key(|p| p.y).unwrap().y);
@@ -258,7 +268,8 @@ impl Rasteriser {
                         }
                         p.x += 1;
                     }
-                    p.y += 1
+                    p.y += 1;
+                    p.x = min_x;
                 }
             }
         }
@@ -290,15 +301,15 @@ fn main() {
     let col1 = vec4(0., 1., 0., 0.);
     let col2 = vec4(-Deg::sin(Deg(angle)), 0., Deg::cos(Deg(angle)), 0.);
     let col3 = vec4(0., 0., 0., 1.);
+    #[rustfmt::skip]
+    let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
+                                                    0.,1.,0.,0.,
+                                                    0.,0.,1.,0.,
+                                                    0.,0.,1.5,1.,);
 
     while r.window.is_open() && !r.window.is_key_down(Key::Escape) {
         // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
         for mut tri in model.tris.clone() {
-            #[rustfmt::skip]
-            let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
-                                                            0.,1.,0.,0.,
-                                                            0.,0.,1.,0.,
-                                                            0.,0.,1.5,1.,);
             let col0 = vec4(Deg::cos(Deg(angle)), 0., Deg::sin(Deg(angle)), 0.);
             let col2 = vec4(-Deg::sin(Deg(angle)), 0., Deg::cos(Deg(angle)), 0.);
             let rotation_matrix = cgmath::Matrix4 {
@@ -312,6 +323,7 @@ fn main() {
                     translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                 );
             }
+            r.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
             r.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
         }
         angle += 1.5;
