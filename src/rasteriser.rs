@@ -3,7 +3,7 @@ use cgmath::point2;
 use cgmath::Deg;
 use cgmath::Point2;
 use cgmath::Point3;
-use minifb::{Key, Window, WindowOptions};
+use minifb::Window;
 use rand::Rng;
 
 type ScreenPoint = Point2<usize>;
@@ -24,6 +24,7 @@ pub enum TriangleShading {
 pub struct Rasteriser {
     pub window: Window,
     pub buffer: Vec<u32>,
+    pub depth_buffer: Vec<u32>,
     width: usize,
     height: usize,
 }
@@ -35,6 +36,7 @@ impl Rasteriser {
             width,
             height,
             buffer: vec![0; (width * height) as usize],
+            depth_buffer: vec![0; (width * height) as usize],
         }
     }
     pub fn clear_framebuffer(&mut self) {
@@ -93,6 +95,13 @@ impl Rasteriser {
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
         for i in tri.position.iter_mut() {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
+        }
+
+        // HACK?: don't render stuff behind us
+        for i in tri.position.iter() {
+            if i.z > 1. {
+                return;
+            }
         }
 
         let c0 = 1.;
