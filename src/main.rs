@@ -20,20 +20,33 @@ use std::io::{BufRead, BufReader};
 
 type Triangle = [Point3<f32>; 3];
 type ScreenPoint = Point2<usize>;
-enum TriangleShading {
-    Points,
-    Wireframe,
-    Flat,
+
+// To interface with the rasteriser
+struct TriangleData {
+    position: [Point3<f32>; 3],
+    texture: [Point3<f32>; 3],
+    normal: [Point3<f32>; 3],
 }
+
+// Holds all data corresponding to a loaded obj
 struct ObjData {
-    tris: Vec<Triangle>, // each tri is a collection of 3 points
+    // Triplet of vertices, Triplet of normals, 1/2/3 Texture coords
+    tri_positions: Vec<[Point3<f32>; 3]>,
+    tri_textures: Vec<[Point3<f32>; 3]>,
+    tri_normals: Vec<[Point3<f32>; 3]>,
 }
 
 impl ObjData {
     fn new(obj_path: &str) -> ObjData {
-        // TODO: parse obj file
-        let mut temp_vertex_buffer: Vec<f32> = vec![];
-        let mut tris: Vec<Triangle> = vec![];
+        // Temp buffers to be indexed into
+        let mut temp_vertex_buffer: Vec<f32> = Vec::new();
+        let mut temp_vertex_texture_buffer: Vec<f32> = Vec::new();
+        let mut temp_vertex_normal_buffer: Vec<f32> = Vec::new();
+
+        // The actual data
+        let mut tri_positions: Vec<[Point3<f32>; 3]> = Vec::new();
+        let mut tri_textures: Vec<[Point3<f32>; 3]> = Vec::new();
+        let mut tri_normals: Vec<[Point3<f32>; 3]> = Vec::new();
 
         let file = File::open(obj_path).unwrap();
         let reader = BufReader::new(file);
@@ -48,13 +61,46 @@ impl ObjData {
                 match id {
                     'v' => match line.chars().nth(1).unwrap() {
                         ' ' => {
-                            let vertexes: Vec<&str> = line.split(' ').collect();
+                            let vertexes: Vec<&str> = line.split_whitespace().collect();
                             temp_vertex_buffer.push(vertexes[1].parse::<f32>().unwrap());
                             temp_vertex_buffer.push(vertexes[2].parse::<f32>().unwrap());
                             temp_vertex_buffer.push(vertexes[3].parse::<f32>().unwrap());
                         }
-                        't' => (), /*panic!("Vertex texture!")*/
-                        'n' => (), /*panic!("Vertex normal!")*/
+                        't' => {
+                            //(u, [v, w]) coordinates, these will vary between 0 and 1.
+                            // v, w are optional and default to 0.
+                            let vertexes: Vec<&str> = line.split_whitespace().collect();
+                            match vertexes.len() {
+                                2 => {
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                    temp_vertex_texture_buffer.push(0.);
+                                    temp_vertex_texture_buffer.push(0.);
+                                }
+                                3 => {
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[2].parse::<f32>().unwrap());
+                                    temp_vertex_texture_buffer.push(0.);
+                                }
+                                4 => {
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[2].parse::<f32>().unwrap());
+                                    temp_vertex_texture_buffer
+                                        .push(vertexes[3].parse::<f32>().unwrap());
+                                }
+                                _ => panic!("Error parsing vertex textures: {}", line),
+                            }
+                        }
+                        'n' => {
+                            let vertexes: Vec<&str> = line.split_whitespace().collect();
+                            temp_vertex_normal_buffer.push(vertexes[1].parse::<f32>().unwrap());
+                            temp_vertex_normal_buffer.push(vertexes[2].parse::<f32>().unwrap());
+                            temp_vertex_normal_buffer.push(vertexes[3].parse::<f32>().unwrap());
+                        }
                         _ => println!("Unhandled obj expression: {}", line),
                     },
                     'f' => {
@@ -63,58 +109,121 @@ impl ObjData {
                             .iter()
                             .map(|x| x.chars().filter(|y| *y == '/').count())
                             .sum();
-                        let f0: usize;
-                        let f1: usize;
-                        let f2: usize;
+                        let v0: usize;
+                        let v1: usize;
+                        let v2: usize;
+                        let vt0: usize;
+                        let vt1: usize;
+                        let vt2: usize;
+                        let vn0: usize;
+                        let vn1: usize;
+                        let vn2: usize;
                         match slash_frequency {
                             0 => {
-                                f0 = faces[1].parse::<usize>().unwrap() - 1;
-                                f1 = faces[2].parse::<usize>().unwrap() - 1;
-                                f2 = faces[3].parse::<usize>().unwrap() - 1;
+                                // FIXME: calulcate vn, fill vt with empty references
+                                v0 = faces[1].parse::<usize>().unwrap() - 1;
+                                v1 = faces[2].parse::<usize>().unwrap() - 1;
+                                v2 = faces[3].parse::<usize>().unwrap() - 1;
+                                panic!();
                             }
                             6 => {
-                                f0 = faces[1].split('/').collect::<Vec<&str>>()[0]
-                                    .parse::<usize>()
-                                    .unwrap()
-                                    - 1;
-                                f1 = faces[2].split('/').collect::<Vec<&str>>()[0]
-                                    .parse::<usize>()
-                                    .unwrap()
-                                    - 1;
-                                f2 = faces[3].split('/').collect::<Vec<&str>>()[0]
-                                    .parse::<usize>()
-                                    .unwrap()
-                                    - 1;
+                                // FIXME: probably breaks with v//vn format
+                                let group0 = faces[1].split('/').collect::<Vec<&str>>();
+                                let group1 = faces[2].split('/').collect::<Vec<&str>>();
+                                let group2 = faces[3].split('/').collect::<Vec<&str>>();
+                                v0 = group0[0].parse::<usize>().unwrap() - 1;
+                                v1 = group1[0].parse::<usize>().unwrap() - 1;
+                                v2 = group2[0].parse::<usize>().unwrap() - 1;
+                                vt0 = group0[1].parse::<usize>().unwrap() - 1;
+                                vt1 = group1[1].parse::<usize>().unwrap() - 1;
+                                vt2 = group2[1].parse::<usize>().unwrap() - 1;
+                                vn0 = group0[2].parse::<usize>().unwrap() - 1;
+                                vn1 = group1[2].parse::<usize>().unwrap() - 1;
+                                vn2 = group2[2].parse::<usize>().unwrap() - 1;
                             }
                             _ => panic!("Unhandled format of faces: {}", line),
                         }
-                        let tri: [Point3<f32>; 3] = [
+                        let tri_position: [Point3<f32>; 3] = [
                             point3(
-                                temp_vertex_buffer[f0 * 3],
-                                temp_vertex_buffer[f0 * 3 + 1],
-                                temp_vertex_buffer[f0 * 3 + 2],
+                                temp_vertex_buffer[v0 * 3],
+                                temp_vertex_buffer[v0 * 3 + 1],
+                                temp_vertex_buffer[v0 * 3 + 2],
                             ),
                             point3(
-                                temp_vertex_buffer[f1 * 3],
-                                temp_vertex_buffer[f1 * 3 + 1],
-                                temp_vertex_buffer[f1 * 3 + 2],
+                                temp_vertex_buffer[v1 * 3],
+                                temp_vertex_buffer[v1 * 3 + 1],
+                                temp_vertex_buffer[v1 * 3 + 2],
                             ),
                             point3(
-                                temp_vertex_buffer[f2 * 3],
-                                temp_vertex_buffer[f2 * 3 + 1],
-                                temp_vertex_buffer[f2 * 3 + 2],
+                                temp_vertex_buffer[v2 * 3],
+                                temp_vertex_buffer[v2 * 3 + 1],
+                                temp_vertex_buffer[v2 * 3 + 2],
                             ),
                         ];
-                        tris.push(tri);
+                        let tri_texture: [Point3<f32>; 3] = [
+                            point3(
+                                temp_vertex_texture_buffer[vt0 * 3],
+                                temp_vertex_texture_buffer[vt0 * 3 + 1],
+                                temp_vertex_texture_buffer[vt0 * 3 + 2],
+                            ),
+                            point3(
+                                temp_vertex_texture_buffer[vt1 * 3],
+                                temp_vertex_texture_buffer[vt1 * 3 + 1],
+                                temp_vertex_texture_buffer[vt1 * 3 + 2],
+                            ),
+                            point3(
+                                temp_vertex_texture_buffer[vt2 * 3],
+                                temp_vertex_texture_buffer[vt2 * 3 + 1],
+                                temp_vertex_texture_buffer[vt2 * 3 + 2],
+                            ),
+                        ];
+                        let tri_normal: [Point3<f32>; 3] = [
+                            point3(
+                                temp_vertex_normal_buffer[vn0 * 3],
+                                temp_vertex_normal_buffer[vn0 * 3 + 1],
+                                temp_vertex_normal_buffer[vn0 * 3 + 2],
+                            ),
+                            point3(
+                                temp_vertex_normal_buffer[vn1 * 3],
+                                temp_vertex_normal_buffer[vn1 * 3 + 1],
+                                temp_vertex_normal_buffer[vn1 * 3 + 2],
+                            ),
+                            point3(
+                                temp_vertex_normal_buffer[vn2 * 3],
+                                temp_vertex_normal_buffer[vn2 * 3 + 1],
+                                temp_vertex_normal_buffer[vn2 * 3 + 2],
+                            ),
+                        ];
+                        tri_positions.push(tri_position);
+                        tri_textures.push(tri_texture);
+                        tri_normals.push(tri_normal);
                     }
-                    '#' => println!("Comment: {}", line),
-                    _ => println!("Unhandled obj expression: {}", line),
+                    '#' => println!(".obj file comment: {}", line),
+                    _ => println!("Unhandled obj expression: {}", line), // should panic!() instead
                 }
             }
         }
 
-        ObjData { tris }
+        assert!(
+            tri_positions.len() == tri_textures.len() && tri_textures.len() == tri_normals.len(),
+            "Incorrect parsing of position/normals/textures: {} {} {}",
+            tri_positions.len(),
+            tri_textures.len(),
+            tri_normals.len()
+        );
+
+        ObjData {
+            tri_positions,
+            tri_textures,
+            tri_normals,
+        }
     }
+}
+
+enum TriangleShading {
+    Points,
+    Wireframe,
+    Flat,
 }
 
 struct Rasteriser {
@@ -174,31 +283,30 @@ impl Rasteriser {
         }
     }
 
-    fn draw_triangle(&mut self, mut tri: Triangle, triangle_type: TriangleShading, color: u32) {
-        // CRUCIAL MISTAKE: every 4 input values make up a column, NOT A ROW!!!
+    fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
         let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
 
         // cumulative model matrix = translation * rotation * scale * vector
         // screen space matrix = viewport * projection * camera * model
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
-        for i in tri.iter_mut() {
+        for i in tri.position.iter_mut() {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
         }
 
         let c0 = 1.;
         let c1 = 2.;
-        tri[0].x = (tri[0].x + c0) * self.width as f32 / c1;
-        tri[1].x = (tri[1].x + c0) * self.width as f32 / c1;
-        tri[2].x = (tri[2].x + c0) * self.width as f32 / c1;
-        tri[0].y = (tri[0].y + c0) * self.width as f32 / c1;
-        tri[1].y = (tri[1].y + c0) * self.width as f32 / c1;
-        tri[2].y = (tri[2].y + c0) * self.width as f32 / c1;
+        tri.position[0].x = (tri.position[0].x + c0) * self.width as f32 / c1;
+        tri.position[1].x = (tri.position[1].x + c0) * self.width as f32 / c1;
+        tri.position[2].x = (tri.position[2].x + c0) * self.width as f32 / c1;
+        tri.position[0].y = (tri.position[0].y + c0) * self.width as f32 / c1;
+        tri.position[1].y = (tri.position[1].y + c0) * self.width as f32 / c1;
+        tri.position[2].y = (tri.position[2].y + c0) * self.width as f32 / c1;
 
         //FIXME: floor floats?
-        let mut points: [ScreenPoint; 3] = [
-            point2::<usize>(tri[0].x as usize, tri[0].y as usize),
-            point2::<usize>(tri[1].x as usize, tri[1].y as usize),
-            point2::<usize>(tri[2].x as usize, tri[2].y as usize),
+        let points: [ScreenPoint; 3] = [
+            point2::<usize>(tri.position[0].x as usize, tri.position[0].y as usize),
+            point2::<usize>(tri.position[1].x as usize, tri.position[1].y as usize),
+            point2::<usize>(tri.position[2].x as usize, tri.position[2].y as usize),
         ];
 
         /*
@@ -298,12 +406,10 @@ fn main() {
     r.window
         .limit_update_rate(Some(std::time::Duration::from_micros(16600)));
 
-    let model = ObjData::new("./models/african_head.obj");
+    let model_data = ObjData::new("./models/african_head.obj");
     let mut angle = 0.;
-    let col0 = vec4(Deg::cos(Deg(angle)), 0., Deg::sin(Deg(angle)), 0.);
-    let col1 = vec4(0., 1., 0., 0.);
-    let col2 = vec4(-Deg::sin(Deg(angle)), 0., Deg::cos(Deg(angle)), 0.);
-    let col3 = vec4(0., 0., 0., 1.);
+    let rcol1 = vec4(0., 1., 0., 0.);
+    let rcol3 = vec4(0., 0., 0., 1.);
     #[rustfmt::skip]
     let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
                                                     0.,1.,0.,0.,
@@ -311,27 +417,34 @@ fn main() {
                                                     0.,0.,1.5,1.,);
 
     while r.window.is_open() && !r.window.is_key_down(Key::Escape) {
-        // We unwrap here as we want this code to exit if it fails. Real applications may want to handle this in a different way
-        for mut tri in model.tris.clone() {
-            let col0 = vec4(Deg::cos(Deg(angle)), 0., Deg::sin(Deg(angle)), 0.);
-            let col2 = vec4(-Deg::sin(Deg(angle)), 0., Deg::cos(Deg(angle)), 0.);
+        for i in 0..model_data.tri_positions.len() {
+            let mut tri_position = model_data.tri_positions[i].clone();
+            let rcol0 = vec4(Deg::cos(Deg(angle)), 0., Deg::sin(Deg(angle)), 0.);
+            let rcol2 = vec4(-Deg::sin(Deg(angle)), 0., Deg::cos(Deg(angle)), 0.);
             let rotation_matrix = cgmath::Matrix4 {
-                x: col0,
-                y: col1,
-                z: col2,
-                w: col3,
+                x: rcol0,
+                y: rcol1,
+                z: rcol2,
+                w: rcol3,
             };
-            for i in tri.iter_mut() {
+            for i in tri_position.iter_mut() {
                 *i = Point3::<f32>::from_homogeneous(
                     translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                 );
             }
+            let tri = TriangleData {
+                position: tri_position,
+                texture: model_data.tri_textures[i],
+                normal: model_data.tri_normals[i],
+            };
             r.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
         }
         angle += 1.5;
+
         r.window
             .update_with_buffer(&r.buffer, WIDTH as usize, HEIGHT as usize)
             .unwrap();
+        // clear buffer
         for i in &mut r.buffer {
             *i = 0;
         }
