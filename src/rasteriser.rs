@@ -63,10 +63,8 @@ impl Rasteriser {
                                                             0.,1.,0.,0.,
                                                             0.,0.,1.,0.,
                                                             0.,0.,-2.,1.,);
-            for obj in self.loaded_objs.clone() {
+            for mut obj in self.loaded_objs.clone() {
                 for i in 0..obj.len() {
-                    let mut tri_position = obj.tri_positions[i];
-
                     // vertex shader?
                     let rcol0 = vec4(Deg::cos(Deg(ANGLE)), 0., Deg::sin(Deg(ANGLE)), 0.);
                     let rcol2 = vec4(-Deg::sin(Deg(ANGLE)), 0., Deg::cos(Deg(ANGLE)), 0.);
@@ -76,23 +74,22 @@ impl Rasteriser {
                         z: rcol2,
                         w: rcol3,
                     };
-                    for i in tri_position.iter_mut() {
+
+                    for i in obj.tri_positions[i].iter_mut() {
                         *i = Point3::<f32>::from_homogeneous(
                             translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                         );
                     }
                     // vertex shader //
-                    //
-                    //  TODO: use this to test interpolation with colors in textures
-                    let mut rng = rand::thread_rng();
-                    let color = rng.gen_range(0..=0xffffff);
+
                     let tri = TriangleData {
-                        position: tri_position,
+                        position: obj.tri_positions[i],
                         texture: obj.tri_textures[i],
                         normal: obj.tri_normals[i],
                     };
-                    self.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
+
                     self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
+                    self.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
                 }
             }
             ANGLE += 1.5;
@@ -135,27 +132,15 @@ impl Rasteriser {
         }
     }
 
-    pub fn draw_triangle(
-        &mut self,
-        mut tri: TriangleData,
-        triangle_type: TriangleShading,
-        color: u32,
-    ) {
-        let projection_matrix =
-            perspective(Deg(90.), self.width as f32 / self.height as f32, 0.1, 100.);
+    fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
+        // CRUCIAL MISTAKE: every 4 input values make up a column, NOT A ROW!!!
+        let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
 
         // cumulative model matrix = translation * rotation * scale * vector
         // screen space matrix = viewport * projection * camera * model
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
         for i in tri.position.iter_mut() {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
-        }
-
-        // HACK?: don't render stuff behind us
-        for i in tri.position.iter() {
-            if i.z > 1. {
-                return;
-            }
         }
 
         let c0 = 1.;
@@ -167,11 +152,11 @@ impl Rasteriser {
         tri.position[1].y = (tri.position[1].y + c0) * self.width as f32 / c1;
         tri.position[2].y = (tri.position[2].y + c0) * self.width as f32 / c1;
 
-        //FIXME: floor floats?
+        // why in the f*ck does this break if we order the points from 0-2 instead of 2-0
         let points: [ScreenPoint; 3] = [
-            point2::<usize>(tri.position[0].x as usize, tri.position[0].y as usize),
-            point2::<usize>(tri.position[1].x as usize, tri.position[1].y as usize),
             point2::<usize>(tri.position[2].x as usize, tri.position[2].y as usize),
+            point2::<usize>(tri.position[1].x as usize, tri.position[1].y as usize),
+            point2::<usize>(tri.position[0].x as usize, tri.position[0].y as usize),
         ];
 
         /*
@@ -185,6 +170,7 @@ impl Rasteriser {
 
         match triangle_type {
             TriangleShading::Points => {
+                // TODO: something something clip space
                 if (points[0].x >= self.width)
                     || (points[0].y >= self.height)
                     || (points[1].x >= self.width)
@@ -199,6 +185,7 @@ impl Rasteriser {
                 self.draw_pixel(points[2], color);
             }
             TriangleShading::Wireframe => {
+                // TODO: something something clip space
                 if (points[0].x >= self.width)
                     || (points[0].y >= self.height)
                     || (points[1].x >= self.width)
@@ -213,11 +200,15 @@ impl Rasteriser {
                 self.draw_line(points[2], points[0], color);
             }
             TriangleShading::Flat => {
-                //TODO: faster unsafe unwrap?
+                //TODO: unsafe unwrap?
+                /*
+                let mut rng = rand::thread_rng();
+                let color = rng.gen_range(0..=0xffffff);
+                */
 
                 fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
-                    (c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
-                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32)
+                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
+                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
                         >= 0
                 }
                 // Computes triangle bounding box and clips against screen bounds
