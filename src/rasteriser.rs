@@ -66,6 +66,8 @@ impl Rasteriser {
             for obj in self.loaded_objs.clone() {
                 for i in 0..obj.len() {
                     let mut tri_position = obj.tri_positions[i];
+
+                    // vertex shader?
                     let rcol0 = vec4(Deg::cos(Deg(ANGLE)), 0., Deg::sin(Deg(ANGLE)), 0.);
                     let rcol2 = vec4(-Deg::sin(Deg(ANGLE)), 0., Deg::cos(Deg(ANGLE)), 0.);
                     let rotation_matrix = cgmath::Matrix4 {
@@ -79,6 +81,8 @@ impl Rasteriser {
                             translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                         );
                     }
+                    // vertex shader //
+                    //
                     //  TODO: use this to test interpolation with colors in textures
                     let mut rng = rand::thread_rng();
                     let color = rng.gen_range(0..=0xffffff);
@@ -87,8 +91,8 @@ impl Rasteriser {
                         texture: obj.tri_textures[i],
                         normal: obj.tri_normals[i],
                     };
-                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                     self.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
+                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
             ANGLE += 1.5;
@@ -144,7 +148,7 @@ impl Rasteriser {
         // screen space matrix = viewport * projection * camera * model
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
         for i in tri.position.iter_mut() {
-            *i = Point3::<f32>::from_homogeneous((*i).to_homogeneous());
+            *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
         }
 
         // HACK?: don't render stuff behind us
@@ -212,8 +216,8 @@ impl Rasteriser {
                 //TODO: faster unsafe unwrap?
 
                 fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
-                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
-                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
+                    (c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
+                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32)
                         >= 0
                 }
                 // Computes triangle bounding box and clips against screen bounds
