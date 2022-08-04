@@ -1,9 +1,11 @@
 use crate::ObjData;
 use cgmath::perspective;
 use cgmath::point2;
+use cgmath::vec3;
 use cgmath::vec4;
 use cgmath::Angle;
 use cgmath::Deg;
+use cgmath::InnerSpace;
 use cgmath::Point2;
 use cgmath::Point3;
 use rand::Rng;
@@ -28,7 +30,7 @@ pub struct Rasteriser {
     width: usize,
     height: usize,
     pub buffer: Vec<u32>,
-    depth_buffer: Vec<u32>,
+    depth_buffer: Vec<u8>,
     loaded_objs: Vec<ObjData>,
 }
 
@@ -89,7 +91,6 @@ impl Rasteriser {
                     };
 
                     self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
-                    self.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
                 }
             }
             ANGLE += 1.5;
@@ -143,6 +144,23 @@ impl Rasteriser {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
         }
 
+        // This is flat shading
+        // light intensity
+        let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
+        // let light_dir = vec3(0., 0., -1.).normalize(); //FIXME: gamma correction
+        let normal = (tri.position[2] - tri.position[0])
+            .cross(tri.position[1] - tri.position[0])
+            .normalize();
+        let intensity = normal.dot(light_dir);
+        // back-face culling
+        if intensity <= 0. {
+            return;
+        }
+        //TODO: would it be better to use something like an rgb struct?
+        let color = (((color & 0xff0000 >> 16) as f32 * intensity) as u32) << 16
+            | (((color & 0x00ff00 >> 8) as f32 * intensity) as u32) << 8
+            | (((color & 0xff) as f32 * intensity) as u32);
+
         let c0 = 1.;
         let c1 = 2.;
         tri.position[0].x = (tri.position[0].x + c0) * self.width as f32 / c1;
@@ -170,7 +188,6 @@ impl Rasteriser {
 
         match triangle_type {
             TriangleShading::Points => {
-                // TODO: something something clip space
                 if (points[0].x >= self.width)
                     || (points[0].y >= self.height)
                     || (points[1].x >= self.width)
@@ -185,7 +202,6 @@ impl Rasteriser {
                 self.draw_pixel(points[2], color);
             }
             TriangleShading::Wireframe => {
-                // TODO: something something clip space
                 if (points[0].x >= self.width)
                     || (points[0].y >= self.height)
                     || (points[1].x >= self.width)
