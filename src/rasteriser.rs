@@ -1,14 +1,17 @@
+use crate::ObjData;
 use cgmath::perspective;
 use cgmath::point2;
+use cgmath::vec4;
+use cgmath::Angle;
 use cgmath::Deg;
 use cgmath::Point2;
 use cgmath::Point3;
-use minifb::Window;
 use rand::Rng;
 
 type ScreenPoint = Point2<usize>;
 
 // To interface with the rasteriser
+#[derive(Clone, Copy)]
 pub struct TriangleData {
     pub position: [Point3<f32>; 3],
     pub texture: [Point3<f32>; 3],
@@ -22,26 +25,73 @@ pub enum TriangleShading {
 }
 
 pub struct Rasteriser {
-    pub window: Window,
-    pub buffer: Vec<u32>,
-    pub depth_buffer: Vec<u32>,
     width: usize,
     height: usize,
+    pub buffer: Vec<u32>,
+    depth_buffer: Vec<u32>,
+    loaded_objs: Vec<ObjData>,
 }
 
 impl Rasteriser {
-    pub fn new(window: Window, width: usize, height: usize) -> Rasteriser {
+    pub fn new(width: usize, height: usize) -> Rasteriser {
         Rasteriser {
-            window,
             width,
             height,
             buffer: vec![0; (width * height) as usize],
             depth_buffer: vec![0; (width * height) as usize],
+            loaded_objs: Vec::new(),
         }
     }
+
     pub fn clear_framebuffer(&mut self) {
         for i in self.buffer.iter_mut() {
             *i = 0;
+        }
+    }
+
+    pub fn load_obj(&mut self, obj_path: &str) {
+        self.loaded_objs.push(ObjData::new(obj_path));
+    }
+
+    pub fn render_frame(&mut self) {
+        unsafe {
+            static mut ANGLE: f32 = 30.;
+            let rcol1 = vec4(0., 1., 0., 0.);
+            let rcol3 = vec4(0., 0., 0., 1.);
+            #[rustfmt::skip]
+            let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
+                                                            0.,1.,0.,0.,
+                                                            0.,0.,1.,0.,
+                                                            0.,0.,-2.,1.,);
+            for obj in self.loaded_objs.clone() {
+                for i in 0..obj.len() {
+                    let mut tri_position = obj.tri_positions[i];
+                    let rcol0 = vec4(Deg::cos(Deg(ANGLE)), 0., Deg::sin(Deg(ANGLE)), 0.);
+                    let rcol2 = vec4(-Deg::sin(Deg(ANGLE)), 0., Deg::cos(Deg(ANGLE)), 0.);
+                    let rotation_matrix = cgmath::Matrix4 {
+                        x: rcol0,
+                        y: rcol1,
+                        z: rcol2,
+                        w: rcol3,
+                    };
+                    for i in tri_position.iter_mut() {
+                        *i = Point3::<f32>::from_homogeneous(
+                            translation_matrix * rotation_matrix * (*i).to_homogeneous(),
+                        );
+                    }
+                    //  TODO: use this to test interpolation with colors in textures
+                    let mut rng = rand::thread_rng();
+                    let color = rng.gen_range(0..=0xffffff);
+                    let tri = TriangleData {
+                        position: tri_position,
+                        texture: obj.tri_textures[i],
+                        normal: obj.tri_normals[i],
+                    };
+                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
+                    self.draw_triangle(tri, TriangleShading::Wireframe, 0xff0000);
+                }
+            }
+            ANGLE += 1.5;
         }
     }
 
@@ -94,7 +144,7 @@ impl Rasteriser {
         // screen space matrix = viewport * projection * camera * model
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
         for i in tri.position.iter_mut() {
-            *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
+            *i = Point3::<f32>::from_homogeneous((*i).to_homogeneous());
         }
 
         // HACK?: don't render stuff behind us
@@ -159,9 +209,7 @@ impl Rasteriser {
                 self.draw_line(points[2], points[0], color);
             }
             TriangleShading::Flat => {
-                //TODO: unsafe unwrap?
-                let mut rng = rand::thread_rng();
-                let color = rng.gen_range(0..=0xffffff);
+                //TODO: faster unsafe unwrap?
 
                 fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
                     ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)

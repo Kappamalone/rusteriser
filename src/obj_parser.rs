@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 // Holds all data corresponding to a loaded obj
+#[derive(Clone)]
 pub struct ObjData {
     // Triplet of vertices, Triplet of normals, Texture coords
     pub tri_positions: Vec<[Point3<f32>; 3]>,
@@ -12,6 +13,10 @@ pub struct ObjData {
 }
 
 impl ObjData {
+    pub fn len(&self) -> usize {
+        return self.tri_positions.len();
+    }
+
     pub fn new(obj_path: &str) -> ObjData {
         // Temp buffers to be indexed into
         let mut temp_vertex_buffer: Vec<f32> = Vec::new();
