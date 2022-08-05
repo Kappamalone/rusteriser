@@ -1,6 +1,7 @@
 use crate::ObjData;
 use cgmath::perspective;
 use cgmath::point2;
+use cgmath::point3;
 use cgmath::vec3;
 use cgmath::vec4;
 use cgmath::Angle;
@@ -9,9 +10,6 @@ use cgmath::InnerSpace;
 use cgmath::Point2;
 use cgmath::Point3;
 use rand::Rng;
-
-//TODO: remove this
-type ScreenPoint = Point2<usize>;
 
 // To interface with the rasteriser
 #[derive(Clone, Copy)]
@@ -31,7 +29,7 @@ pub struct Rasteriser {
     width: usize,
     height: usize,
     pub buffer: Vec<u32>,
-    depth_buffer: Vec<u32>,
+    zbuffer: Vec<f32>,
     loaded_objs: Vec<ObjData>,
 }
 
@@ -41,7 +39,7 @@ impl Rasteriser {
             width,
             height,
             buffer: vec![0; (width * height) as usize],
-            depth_buffer: vec![0; (width * height) as usize],
+            zbuffer: vec![std::f32::INFINITY; (width * height) as usize],
             loaded_objs: Vec::new(),
         }
     }
@@ -50,6 +48,9 @@ impl Rasteriser {
         for i in self.buffer.iter_mut() {
             *i = 0;
         }
+        for i in self.zbuffer.iter_mut() {
+            *i = std::f32::INFINITY;
+        }
     }
 
     pub fn load_obj(&mut self, obj_path: &str) {
@@ -57,6 +58,7 @@ impl Rasteriser {
     }
 
     pub fn render_frame(&mut self) {
+        self.clear_framebuffer();
         unsafe {
             static mut ANGLE: f32 = 30.;
             let rcol1 = vec4(0., 1., 0., 0.);
@@ -98,25 +100,25 @@ impl Rasteriser {
         }
     }
 
-    fn draw_pixel(&mut self, p: ScreenPoint, color: u32) {
+    fn draw_pixel(&mut self, x: usize, y: usize, color: u32) {
         // this performs a horizontal and vertical flip on our pixel position
         // to account for the way the framebuffer is layed out in memory
         // let coord = (self.width * self.height) - ((self.width - p.x) + p.y * self.width);
         // FIXME: I'm confused, but this makes it so that +x is right, +y is up, and +z is towards
         // us like opengl
-        let coord = (self.width * self.height) - ((self.width - p.x) + p.y * self.width);
+        let coord = (self.width * self.height) - ((self.width - x) + y * self.width);
         self.buffer[coord as usize] = color; //RGBA32, except minifb makes A always 1
     }
 
-    fn draw_line(&mut self, mut p0: ScreenPoint, p1: ScreenPoint, color: u32) {
-        let dx = (p1.x as i32 - p0.x as i32).abs();
-        let dy = -((p1.y as i32 - p0.y as i32).abs());
-        let sx: i32 = if p0.x < p1.x { 1 } else { -1 };
-        let sy: i32 = if p0.y < p1.y { 1 } else { -1 };
+    fn draw_line(&mut self, mut x0: usize, mut y0: usize, x1: usize, y1: usize, color: u32) {
+        let dx = (x1 as i32 - x0 as i32).abs();
+        let dy = -((y1 as i32 - y0 as i32).abs());
+        let sx: i32 = if x0 < x1 { 1 } else { -1 };
+        let sy: i32 = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
         loop {
-            self.draw_pixel(p0, color);
-            if p0.x == p1.x && p0.y == p1.y {
+            self.draw_pixel(x0, y0, color);
+            if x0 == x1 && y0 == y1 {
                 break;
             }
             let e2 = err * 2;
@@ -125,11 +127,11 @@ impl Rasteriser {
             // WTF?
             if e2 >= dy {
                 err += dy;
-                p0.x = (p0.x as i32 + sx) as usize;
+                x0 = (x0 as i32 + sx) as usize;
             }
             if e2 <= dx {
                 err += dx;
-                p0.y = (p0.y as i32 + sy) as usize;
+                y0 = (y0 as i32 + sy) as usize;
             }
         }
     }
@@ -173,11 +175,6 @@ impl Rasteriser {
         tri.position[2].y = (tri.position[2].y + 1.) * self.width as f32 * 0.5;
 
         // winding order of vertices in .obj files are counter-clockwise
-        let points: [ScreenPoint; 3] = [
-            point2::<usize>(tri.position[2].x as usize, tri.position[2].y as usize),
-            point2::<usize>(tri.position[1].x as usize, tri.position[1].y as usize),
-            point2::<usize>(tri.position[0].x as usize, tri.position[0].y as usize),
-        ];
 
         /*
         let tri[0].x = tri[0].x as i32;
@@ -190,32 +187,48 @@ impl Rasteriser {
 
         match triangle_type {
             TriangleShading::Points => {
-                if (points[0].x >= self.width)
-                    || (points[0].y >= self.height)
-                    || (points[1].x >= self.width)
-                    || (points[1].y >= self.height)
-                    || (points[2].x >= self.width)
-                    || (points[2].y >= self.height)
-                {
-                    return;
+                for p in tri.position {
+                    if p.x as usize >= self.width || p.y as usize >= self.height {
+                        return;
+                    }
                 }
-                self.draw_pixel(points[0], color);
-                self.draw_pixel(points[1], color);
-                self.draw_pixel(points[2], color);
+                self.draw_pixel(
+                    tri.position[0].x as usize,
+                    tri.position[0].y as usize,
+                    color,
+                );
+                self.draw_pixel(
+                    tri.position[1].x as usize,
+                    tri.position[1].y as usize,
+                    color,
+                );
+                self.draw_pixel(
+                    tri.position[2].x as usize,
+                    tri.position[2].y as usize,
+                    color,
+                );
             }
             TriangleShading::Wireframe => {
-                if (points[0].x >= self.width)
-                    || (points[0].y >= self.height)
-                    || (points[1].x >= self.width)
-                    || (points[1].y >= self.height)
-                    || (points[2].x >= self.width)
-                    || (points[2].y >= self.height)
-                {
-                    return;
+                for p in tri.position {
+                    if p.x as usize >= self.width || p.y as usize >= self.height {
+                        return;
+                    }
                 }
-                self.draw_line(points[0], points[1], color);
-                self.draw_line(points[1], points[2], color);
-                self.draw_line(points[2], points[0], color);
+                self.draw_pixel(
+                    tri.position[0].x as usize,
+                    tri.position[0].y as usize,
+                    color,
+                );
+                self.draw_pixel(
+                    tri.position[1].x as usize,
+                    tri.position[1].y as usize,
+                    color,
+                );
+                self.draw_pixel(
+                    tri.position[2].x as usize,
+                    tri.position[2].y as usize,
+                    color,
+                );
             }
             TriangleShading::Flat => {
                 //TODO: unsafe unwrap?
@@ -223,32 +236,57 @@ impl Rasteriser {
                 // rasteriser, interpolate z depth, and interpolate textures
 
                 // Computes triangle bounding box and clips against screen bounds
-                let min_x = std::cmp::max(0, points.iter().min_by_key(|p| p.x).unwrap().x);
-                let min_y = std::cmp::max(0, points.iter().min_by_key(|p| p.y).unwrap().y);
-                let max_x =
-                    std::cmp::min(self.width - 1, points.iter().max_by_key(|p| p.x).unwrap().x);
-                let max_y = std::cmp::min(
-                    self.height - 1,
-                    points.iter().max_by_key(|p| p.y).unwrap().y,
+                let tri_position_integer = tri
+                    .position
+                    .map(|p| point3(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32));
+                let min_x: i32 = std::cmp::max(
+                    0,
+                    tri_position_integer.iter().min_by_key(|p| p.x).unwrap().x,
                 );
-                fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
-                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
-                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
-                        >= 0
+                let min_y: i32 = std::cmp::max(
+                    0,
+                    tri_position_integer.iter().min_by_key(|p| p.y).unwrap().y,
+                );
+                let max_x: i32 = std::cmp::min(
+                    (self.width - 1) as i32,
+                    tri_position_integer.iter().max_by_key(|p| p.x).unwrap().x,
+                );
+                let max_y: i32 = std::cmp::min(
+                    (self.height - 1) as i32,
+                    tri_position_integer.iter().max_by_key(|p| p.y).unwrap().y,
+                );
+
+                // doesn't actually need z coord
+                #[inline(always)]
+                fn edge(v0: Point3<i32>, v1: Point3<i32>, v2: Point3<i32>) -> i32 {
+                    (v2.x - v0.x) * (v1.y - v0.y) - (v2.y - v0.y) * (v1.x - v0.x)
                 }
-                let mut p = point2(0, 0);
+
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
-                        p.x = x;
-                        p.y = y;
-                        let mut inside = true;
-                        inside &= edge(points[0], points[1], p);
-                        inside &= edge(points[1], points[2], p);
-                        inside &= edge(points[2], points[0], p);
-                        if !inside {
+                        let p = point3(x, y, 0);
+                        let area = edge(
+                            tri_position_integer[2],
+                            tri_position_integer[1],
+                            tri_position_integer[0],
+                        );
+                        let mut w0 = edge(tri_position_integer[1], tri_position_integer[0], p);
+                        let mut w1 = edge(tri_position_integer[2], tri_position_integer[1], p);
+                        let mut w2 = edge(tri_position_integer[0], tri_position_integer[2], p);
+                        if w0 <= 0 || w1 <= 0 || w2 <= 0 {
                             continue;
                         }
-                        self.draw_pixel(p, color);
+                        w0 /= area;
+                        w1 /= area;
+                        w2 /= area;
+                        let zdepth = w0 as f32 * tri.position[2].z
+                            + w1 as f32 * tri.position[0].z
+                            + w2 as f32 * tri.position[1].z;
+                        let coord = x as usize + self.width * y as usize;
+                        if zdepth < self.zbuffer[coord] {
+                            self.zbuffer[coord] = zdepth;
+                            self.draw_pixel(x as usize, y as usize, color);
+                        }
                     }
                 }
             }
