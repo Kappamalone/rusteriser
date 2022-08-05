@@ -82,7 +82,7 @@ impl Rasteriser {
 
                     for i in obj.tri_positions[i].iter_mut() {
                         *i = Point3::<f32>::from_homogeneous(
-                            translation_matrix * rotation_matrix * (*i).to_homogeneous(),
+                            translation_matrix * (*i).to_homogeneous(),
                         );
                     }
                     // vertex shader //
@@ -93,7 +93,7 @@ impl Rasteriser {
                         normal: obj.tri_normals[i],
                     };
 
-                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffffff);
+                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
             ANGLE += 1.5;
@@ -214,31 +214,36 @@ impl Rasteriser {
                         return;
                     }
                 }
-                self.draw_pixel(
+                self.draw_line(
                     tri.position[0].x as usize,
                     tri.position[0].y as usize,
-                    color,
-                );
-                self.draw_pixel(
                     tri.position[1].x as usize,
                     tri.position[1].y as usize,
                     color,
                 );
-                self.draw_pixel(
+                self.draw_line(
+                    tri.position[1].x as usize,
+                    tri.position[1].y as usize,
                     tri.position[2].x as usize,
                     tri.position[2].y as usize,
+                    color,
+                );
+                self.draw_line(
+                    tri.position[2].x as usize,
+                    tri.position[2].y as usize,
+                    tri.position[0].x as usize,
+                    tri.position[0].y as usize,
                     color,
                 );
             }
             TriangleShading::Flat => {
                 //TODO: unsafe unwrap?
-                // TODO: understand and reuse edge function in order to
-                // rasteriser, interpolate z depth, and interpolate textures
 
                 // Computes triangle bounding box and clips against screen bounds
                 let tri_position_integer = tri
                     .position
-                    .map(|p| point3(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32));
+                    .map(|p| point3(p.x as i32, p.y as i32, p.z as i32));
+
                 let min_x: i32 = std::cmp::max(
                     0,
                     tri_position_integer.iter().min_by_key(|p| p.x).unwrap().x,
@@ -258,30 +263,35 @@ impl Rasteriser {
 
                 // doesn't actually need z coord
                 #[inline(always)]
-                fn edge(v0: Point3<i32>, v1: Point3<i32>, v2: Point3<i32>) -> i32 {
+                fn edge<T: std::ops::Mul<Output = T> + std::ops::Sub<Output = T> + Copy>(
+                    v0: Point3<T>,
+                    v1: Point3<T>,
+                    v2: Point3<T>,
+                ) -> T {
                     (v2.x - v0.x) * (v1.y - v0.y) - (v2.y - v0.y) * (v1.x - v0.x)
                 }
 
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
                         let p = point3(x, y, 0);
-                        let area = edge(
-                            tri_position_integer[2],
-                            tri_position_integer[1],
-                            tri_position_integer[0],
-                        );
-                        let mut w0 = edge(tri_position_integer[1], tri_position_integer[0], p);
-                        let mut w1 = edge(tri_position_integer[2], tri_position_integer[1], p);
-                        let mut w2 = edge(tri_position_integer[0], tri_position_integer[2], p);
-                        if w0 <= 0 || w1 <= 0 || w2 <= 0 {
+                        let area: f32 = edge(tri.position[2], tri.position[1], tri.position[0]);
+
+                        // negative as obj files define points in counter clockwise order
+                        let mut w0 =
+                            -edge(tri_position_integer[0], tri_position_integer[1], p) as f32;
+                        let mut w1 =
+                            -edge(tri_position_integer[1], tri_position_integer[2], p) as f32;
+                        let mut w2 =
+                            -edge(tri_position_integer[2], tri_position_integer[0], p) as f32;
+                        if w0 < 0. || w1 < 0. || w2 < 0. || area <= 0. {
                             continue;
                         }
                         w0 /= area;
                         w1 /= area;
                         w2 /= area;
-                        let zdepth = w0 as f32 * tri.position[2].z
-                            + w1 as f32 * tri.position[0].z
-                            + w2 as f32 * tri.position[1].z;
+                        let zdepth = w0 * tri.position[2].z
+                            + w1 * tri.position[0].z
+                            + w2 * tri.position[1].z;
                         let coord = x as usize + self.width * y as usize;
                         if zdepth < self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
