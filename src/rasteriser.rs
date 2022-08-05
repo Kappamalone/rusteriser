@@ -10,6 +10,7 @@ use cgmath::Point2;
 use cgmath::Point3;
 use rand::Rng;
 
+//TODO: remove this
 type ScreenPoint = Point2<usize>;
 
 // To interface with the rasteriser
@@ -30,7 +31,7 @@ pub struct Rasteriser {
     width: usize,
     height: usize,
     pub buffer: Vec<u32>,
-    depth_buffer: Vec<u8>,
+    depth_buffer: Vec<u32>,
     loaded_objs: Vec<ObjData>,
 }
 
@@ -90,7 +91,7 @@ impl Rasteriser {
                         normal: obj.tri_normals[i],
                     };
 
-                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
+                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffffff);
                 }
             }
             ANGLE += 1.5;
@@ -134,7 +135,26 @@ impl Rasteriser {
     }
 
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
-        // CRUCIAL MISTAKE: every 4 input values make up a column, NOT A ROW!!!
+        // This is flat shading
+        // light intensity
+        // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
+        let light_dir = vec3(0., 0., -1.).normalize();
+        let normal = (tri.position[2] - tri.position[0])
+            .cross(tri.position[1] - tri.position[0])
+            .normalize();
+        // TODO: https://learnopengl.com/Advanced-Lighting/Gamma-Correction
+        let gamma = 2.2;
+        // FIXME: This is quicker than adjusting for each channel individually, but also inaccurate ie
+        // channel * (intensity ^ gamma) != (channel * intensity) ^ (1/gamma)
+        let intensity = normal.dot(light_dir).powf(gamma);
+        // back-face culling
+        if intensity <= 0. {
+            return;
+        }
+        let color = (((color >> 16 & 0xff) as f32 * intensity) as u32) << 16
+            | (((color >> 8 & 0xff) as f32 * intensity) as u32) << 8
+            | (((color & 0xff) as f32 * intensity) as u32);
+
         let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
 
         // cumulative model matrix = translation * rotation * scale * vector
@@ -144,33 +164,15 @@ impl Rasteriser {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
         }
 
-        // This is flat shading
-        // light intensity
-        let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
-        // let light_dir = vec3(0., 0., -1.).normalize(); //FIXME: gamma correction
-        let normal = (tri.position[2] - tri.position[0])
-            .cross(tri.position[1] - tri.position[0])
-            .normalize();
-        let intensity = normal.dot(light_dir);
-        // back-face culling
-        if intensity <= 0. {
-            return;
-        }
-        //TODO: would it be better to use something like an rgb struct?
-        let color = (((color & 0xff0000 >> 16) as f32 * intensity) as u32) << 16
-            | (((color & 0x00ff00 >> 8) as f32 * intensity) as u32) << 8
-            | (((color & 0xff) as f32 * intensity) as u32);
+        // convert points from NDC to screen/raster space
+        tri.position[0].x = (tri.position[0].x + 1.) * self.width as f32 * 0.5;
+        tri.position[1].x = (tri.position[1].x + 1.) * self.width as f32 * 0.5;
+        tri.position[2].x = (tri.position[2].x + 1.) * self.width as f32 * 0.5;
+        tri.position[0].y = (tri.position[0].y + 1.) * self.width as f32 * 0.5;
+        tri.position[1].y = (tri.position[1].y + 1.) * self.width as f32 * 0.5;
+        tri.position[2].y = (tri.position[2].y + 1.) * self.width as f32 * 0.5;
 
-        let c0 = 1.;
-        let c1 = 2.;
-        tri.position[0].x = (tri.position[0].x + c0) * self.width as f32 / c1;
-        tri.position[1].x = (tri.position[1].x + c0) * self.width as f32 / c1;
-        tri.position[2].x = (tri.position[2].x + c0) * self.width as f32 / c1;
-        tri.position[0].y = (tri.position[0].y + c0) * self.width as f32 / c1;
-        tri.position[1].y = (tri.position[1].y + c0) * self.width as f32 / c1;
-        tri.position[2].y = (tri.position[2].y + c0) * self.width as f32 / c1;
-
-        // why in the f*ck does this break if we order the points from 0-2 instead of 2-0
+        // winding order of vertices in .obj files are counter-clockwise
         let points: [ScreenPoint; 3] = [
             point2::<usize>(tri.position[2].x as usize, tri.position[2].y as usize),
             point2::<usize>(tri.position[1].x as usize, tri.position[1].y as usize),
@@ -217,16 +219,9 @@ impl Rasteriser {
             }
             TriangleShading::Flat => {
                 //TODO: unsafe unwrap?
-                /*
-                let mut rng = rand::thread_rng();
-                let color = rng.gen_range(0..=0xffffff);
-                */
+                // TODO: understand and reuse edge function in order to
+                // rasteriser, interpolate z depth, and interpolate textures
 
-                fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
-                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
-                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
-                        >= 0
-                }
                 // Computes triangle bounding box and clips against screen bounds
                 let min_x = std::cmp::max(0, points.iter().min_by_key(|p| p.x).unwrap().x);
                 let min_y = std::cmp::max(0, points.iter().min_by_key(|p| p.y).unwrap().y);
@@ -236,7 +231,12 @@ impl Rasteriser {
                     self.height - 1,
                     points.iter().max_by_key(|p| p.y).unwrap().y,
                 );
-                let mut p = cgmath::point2(0, 0);
+                fn edge(a: ScreenPoint, b: ScreenPoint, c: ScreenPoint) -> bool {
+                    ((c.x as i32 - a.x as i32) * (b.y as i32 - a.y as i32)
+                        - (c.y as i32 - a.y as i32) * (b.x as i32 - a.x as i32))
+                        >= 0
+                }
+                let mut p = point2(0, 0);
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
                         p.x = x;
@@ -245,9 +245,10 @@ impl Rasteriser {
                         inside &= edge(points[0], points[1], p);
                         inside &= edge(points[1], points[2], p);
                         inside &= edge(points[2], points[0], p);
-                        if inside {
-                            self.draw_pixel(p, color);
+                        if !inside {
+                            continue;
                         }
+                        self.draw_pixel(p, color);
                     }
                 }
             }
