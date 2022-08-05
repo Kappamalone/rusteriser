@@ -33,7 +33,6 @@ impl Frontend {
             self.window
                 .update_with_buffer(&self.rasteriser.buffer, self.width, self.height)
                 .unwrap();
-            self.rasteriser.clear_framebuffer();
         }
     }
 }

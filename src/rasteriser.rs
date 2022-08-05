@@ -39,17 +39,18 @@ impl Rasteriser {
             width,
             height,
             buffer: vec![0; (width * height) as usize],
-            zbuffer: vec![std::f32::INFINITY; (width * height) as usize],
+            zbuffer: vec![-std::f32::INFINITY; (width * height) as usize],
             loaded_objs: Vec::new(),
         }
     }
 
-    pub fn clear_framebuffer(&mut self) {
+    pub fn clear_buffers(&mut self) {
         for i in self.buffer.iter_mut() {
             *i = 0;
         }
+
         for i in self.zbuffer.iter_mut() {
-            *i = std::f32::INFINITY;
+            *i = -std::f32::INFINITY;
         }
     }
 
@@ -58,9 +59,9 @@ impl Rasteriser {
     }
 
     pub fn render_frame(&mut self) {
-        self.clear_framebuffer();
+        self.clear_buffers();
         unsafe {
-            static mut ANGLE: f32 = 30.;
+            static mut ANGLE: f32 = 180.;
             let rcol1 = vec4(0., 1., 0., 0.);
             let rcol3 = vec4(0., 0., 0., 1.);
             #[rustfmt::skip]
@@ -82,7 +83,7 @@ impl Rasteriser {
 
                     for i in obj.tri_positions[i].iter_mut() {
                         *i = Point3::<f32>::from_homogeneous(
-                            translation_matrix * (*i).to_homogeneous(),
+                            translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                         );
                     }
                     // vertex shader //
@@ -162,6 +163,7 @@ impl Rasteriser {
         // cumulative model matrix = translation * rotation * scale * vector
         // screen space matrix = viewport * projection * camera * model
         // viewport matrix basically does (NDC which ranges from -1 to +1) + 1 * width or height
+
         for i in tri.position.iter_mut() {
             *i = Point3::<f32>::from_homogeneous(projection_matrix * (*i).to_homogeneous());
         }
@@ -274,7 +276,7 @@ impl Rasteriser {
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
                         let p = point3(x, y, 0);
-                        let area: f32 = edge(tri.position[2], tri.position[1], tri.position[0]);
+                        let area = edge(tri.position[2], tri.position[1], tri.position[0]);
 
                         // negative as obj files define points in counter clockwise order
                         let mut w0 =
@@ -292,8 +294,11 @@ impl Rasteriser {
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z
                             + w2 * tri.position[1].z;
-                        let coord = x as usize + self.width * y as usize;
-                        if zdepth < self.zbuffer[coord] {
+                        //FIXME: double calculation here and in draw_pixel
+                        let coord = (self.width * self.height)
+                            - ((self.width - x as usize) + y as usize * self.width);
+                        // +z is towards us
+                        if zdepth > self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
                             self.draw_pixel(x as usize, y as usize, color);
                         }
