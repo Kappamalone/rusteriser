@@ -101,13 +101,17 @@ impl Rasteriser {
         }
     }
 
-    fn draw_pixel(&mut self, x: usize, y: usize, color: u32) {
+    #[inline(always)]
+    fn calculate_coord(&self, x: usize, y: usize) -> usize {
+        (self.width * self.height) - ((self.width - x) + y * self.width)
+    }
+
+    fn draw_pixel(&mut self, coord: usize, color: u32) {
         // this performs a horizontal and vertical flip on our pixel position
         // to account for the way the framebuffer is layed out in memory
         // let coord = (self.width * self.height) - ((self.width - p.x) + p.y * self.width);
         // FIXME: I'm confused, but this makes it so that +x is right, +y is up, and +z is towards
         // us like opengl
-        let coord = (self.width * self.height) - ((self.width - x) + y * self.width);
         self.buffer[coord as usize] = color; //RGBA32, except minifb makes A always 1
     }
 
@@ -118,7 +122,7 @@ impl Rasteriser {
         let sy: i32 = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
         loop {
-            self.draw_pixel(x0, y0, color);
+            self.draw_pixel(self.calculate_coord(x0, y0), color);
             if x0 == x1 && y0 == y1 {
                 break;
             }
@@ -140,8 +144,9 @@ impl Rasteriser {
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
         // This is flat shading
         // light intensity
+        let light_dir = vec3(0., 0.9, -0.5).normalize();
         // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
-        let light_dir = vec3(0., 0., -1.).normalize();
+        // let light_dir = vec3(0., 0., -1.).normalize();
         let normal = (tri.position[2] - tri.position[0])
             .cross(tri.position[1] - tri.position[0])
             .normalize();
@@ -158,7 +163,13 @@ impl Rasteriser {
             | (((color >> 8 & 0xff) as f32 * intensity) as u32) << 8
             | (((color & 0xff) as f32 * intensity) as u32);
 
-        let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
+        // FIXME: why you no work
+        // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
+        #[rustfmt::skip]
+        let projection_matrix = cgmath::Matrix4::new(   1.,0.,0.,0.,
+                                                        0.,1.,0.,0.,
+                                                        0.,0.,1.,-1./5.,
+                                                        0.,0.,0.,1.,);
 
         // cumulative model matrix = translation * rotation * scale * vector
         // screen space matrix = viewport * projection * camera * model
@@ -176,7 +187,7 @@ impl Rasteriser {
         tri.position[1].y = (tri.position[1].y + 1.) * self.width as f32 * 0.5;
         tri.position[2].y = (tri.position[2].y + 1.) * self.width as f32 * 0.5;
 
-        // winding order of vertices in .obj files are counter-clockwise
+        // NOTE: winding order of vertices in .obj files are counter-clockwise
 
         /*
         let tri[0].x = tri[0].x as i32;
@@ -195,18 +206,15 @@ impl Rasteriser {
                     }
                 }
                 self.draw_pixel(
-                    tri.position[0].x as usize,
-                    tri.position[0].y as usize,
+                    self.calculate_coord(tri.position[0].x as usize, tri.position[0].y as usize),
                     color,
                 );
                 self.draw_pixel(
-                    tri.position[1].x as usize,
-                    tri.position[1].y as usize,
+                    self.calculate_coord(tri.position[1].x as usize, tri.position[1].y as usize),
                     color,
                 );
                 self.draw_pixel(
-                    tri.position[2].x as usize,
-                    tri.position[2].y as usize,
+                    self.calculate_coord(tri.position[2].x as usize, tri.position[2].y as usize),
                     color,
                 );
             }
@@ -244,7 +252,7 @@ impl Rasteriser {
                 // Computes triangle bounding box and clips against screen bounds
                 let tri_position_integer = tri
                     .position
-                    .map(|p| point3(p.x as i32, p.y as i32, p.z as i32));
+                    .map(|p| point3(p.x.round() as i32, p.y.round() as i32, p.z as i32));
 
                 let min_x: i32 = std::cmp::max(
                     0,
@@ -275,36 +283,30 @@ impl Rasteriser {
 
                 for y in min_y..=max_y {
                     for x in min_x..=max_x {
-                        let p = point3(x, y, 0);
-                        let area = edge(tri.position[2], tri.position[1], tri.position[0]);
+                        // make everything negative as obj files define points in counter clockwise order
+                        let p = point3(x as f32, y as f32, 0.);
+                        let area = -edge(tri.position[0], tri.position[1], tri.position[2]);
 
-                        // negative as obj files define points in counter clockwise order
-                        let mut w0 =
-                            -edge(tri_position_integer[0], tri_position_integer[1], p) as f32;
-                        let mut w1 =
-                            -edge(tri_position_integer[1], tri_position_integer[2], p) as f32;
-                        let mut w2 =
-                            -edge(tri_position_integer[2], tri_position_integer[0], p) as f32;
+                        let mut w0 = -edge(tri.position[0], tri.position[1], p) as f32;
+                        let mut w1 = -edge(tri.position[1], tri.position[2], p) as f32;
+                        let mut w2 = -edge(tri.position[2], tri.position[0], p) as f32;
                         if w0 < 0. || w1 < 0. || w2 < 0. || area <= 0. {
                             continue;
                         }
                         w0 /= area;
                         w1 /= area;
                         w2 /= area;
-                        let zdepth = w0 * tri.position[2].z
-                            + w1 * tri.position[0].z
-                            + w2 * tri.position[1].z;
-                        //FIXME: double calculation here and in draw_pixel
-                        let coord = (self.width * self.height)
-                            - ((self.width - x as usize) + y as usize * self.width);
+                        let zdepth = w2 * tri.position[0].z
+                            + w0 * tri.position[1].z
+                            + w1 * tri.position[2].z;
+                        let coord = self.calculate_coord(x as usize, y as usize);
                         // +z is towards us
                         if zdepth > self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
-                            self.draw_pixel(x as usize, y as usize, color);
+                            self.draw_pixel(coord, color);
                         }
                     }
                 }
             }
         }
     }
-}
