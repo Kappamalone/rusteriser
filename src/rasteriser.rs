@@ -61,14 +61,14 @@ impl Rasteriser {
     pub fn render_frame(&mut self) {
         self.clear_buffers();
         unsafe {
-            static mut ANGLE: f32 = 180.;
+            static mut ANGLE: f32 = 0.;
             let rcol1 = vec4(0., 1., 0., 0.);
             let rcol3 = vec4(0., 0., 0., 1.);
             #[rustfmt::skip]
             let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
                                                             0.,1.,0.,0.,
                                                             0.,0.,1.,0.,
-                                                            0.,0.,-2.,1.,);
+                                                            0.,-3.,-5.,1.,);
             for mut obj in self.loaded_objs.clone() {
                 for i in 0..obj.len() {
                     // vertex shader?
@@ -97,21 +97,21 @@ impl Rasteriser {
                     self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
-            ANGLE += 1.5;
+            ANGLE += 1.;
         }
     }
 
     #[inline(always)]
     fn calculate_coord(&self, x: usize, y: usize) -> usize {
-        (self.width * self.height) - ((self.width - x) + y * self.width)
-    }
-
-    fn draw_pixel(&mut self, coord: usize, color: u32) {
         // this performs a horizontal and vertical flip on our pixel position
         // to account for the way the framebuffer is layed out in memory
         // let coord = (self.width * self.height) - ((self.width - p.x) + p.y * self.width);
         // FIXME: I'm confused, but this makes it so that +x is right, +y is up, and +z is towards
         // us like opengl
+        (self.width * self.height) - ((self.width - x) + y * self.width)
+    }
+
+    fn draw_pixel(&mut self, coord: usize, color: u32) {
         self.buffer[coord as usize] = color; //RGBA32, except minifb makes A always 1
     }
 
@@ -144,9 +144,8 @@ impl Rasteriser {
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
         // This is flat shading
         // light intensity
-        let light_dir = vec3(0., 0.9, -0.5).normalize();
         // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
-        // let light_dir = vec3(0., 0., -1.).normalize();
+        let light_dir = vec3(0., 0., -1.).normalize();
         let normal = (tri.position[2] - tri.position[0])
             .cross(tri.position[1] - tri.position[0])
             .normalize();
@@ -165,10 +164,11 @@ impl Rasteriser {
 
         // FIXME: why you no work
         // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
+        let c: f32 = 1.;
         #[rustfmt::skip]
         let projection_matrix = cgmath::Matrix4::new(   1.,0.,0.,0.,
                                                         0.,1.,0.,0.,
-                                                        0.,0.,1.,-1./5.,
+                                                        0.,0.,1.,-1./c,
                                                         0.,0.,0.,1.,);
 
         // cumulative model matrix = translation * rotation * scale * vector
@@ -293,12 +293,15 @@ impl Rasteriser {
                         if w0 < 0. || w1 < 0. || w2 < 0. || area <= 0. {
                             continue;
                         }
+
                         w0 /= area;
                         w1 /= area;
                         w2 /= area;
-                        let zdepth = w2 * tri.position[0].z
-                            + w0 * tri.position[1].z
-                            + w1 * tri.position[2].z;
+                        // HACK: is this correct?
+                        let zdepth = w0 * tri.position[2].z
+                            + w1 * tri.position[0].z
+                            + w2 * tri.position[1].z;
+
                         let coord = self.calculate_coord(x as usize, y as usize);
                         // +z is towards us
                         if zdepth > self.zbuffer[coord] {
@@ -310,3 +313,4 @@ impl Rasteriser {
             }
         }
     }
+}

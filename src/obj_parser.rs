@@ -92,19 +92,18 @@ impl ObjData {
                         let v0: usize;
                         let v1: usize;
                         let v2: usize;
-                        let vt0: usize;
-                        let vt1: usize;
-                        let vt2: usize;
-                        let vn0: usize;
-                        let vn1: usize;
-                        let vn2: usize;
+                        let mut vt0: Option<usize> = None;
+                        let mut vt1: Option<usize> = None;
+                        let mut vt2: Option<usize> = None;
+                        let mut vn0: Option<usize> = None;
+                        let mut vn1: Option<usize> = None;
+                        let mut vn2: Option<usize> = None;
                         match slash_frequency {
                             0 => {
                                 // FIXME: calulcate vn, fill vt with empty references
                                 v0 = faces[1].parse::<usize>().unwrap() - 1;
                                 v1 = faces[2].parse::<usize>().unwrap() - 1;
                                 v2 = faces[3].parse::<usize>().unwrap() - 1;
-                                panic!();
                             }
                             6 => {
                                 // FIXME: probably breaks with v//vn format
@@ -114,12 +113,12 @@ impl ObjData {
                                 v0 = group0[0].parse::<usize>().unwrap() - 1;
                                 v1 = group1[0].parse::<usize>().unwrap() - 1;
                                 v2 = group2[0].parse::<usize>().unwrap() - 1;
-                                vt0 = group0[1].parse::<usize>().unwrap() - 1;
-                                vt1 = group1[1].parse::<usize>().unwrap() - 1;
-                                vt2 = group2[1].parse::<usize>().unwrap() - 1;
-                                vn0 = group0[2].parse::<usize>().unwrap() - 1;
-                                vn1 = group1[2].parse::<usize>().unwrap() - 1;
-                                vn2 = group2[2].parse::<usize>().unwrap() - 1;
+                                vt0 = Some(group0[1].parse::<usize>().unwrap() - 1);
+                                vt1 = Some(group1[1].parse::<usize>().unwrap() - 1);
+                                vt2 = Some(group2[1].parse::<usize>().unwrap() - 1);
+                                vn0 = Some(group0[2].parse::<usize>().unwrap() - 1);
+                                vn1 = Some(group1[2].parse::<usize>().unwrap() - 1);
+                                vn2 = Some(group2[2].parse::<usize>().unwrap() - 1);
                             }
                             _ => panic!("Unhandled format of faces: {}", line),
                         }
@@ -140,40 +139,52 @@ impl ObjData {
                                 temp_vertex_buffer[v2 * 3 + 2],
                             ),
                         ];
-                        let tri_texture: [Point3<f32>; 3] = [
-                            point3(
-                                temp_vertex_texture_buffer[vt0 * 3],
-                                temp_vertex_texture_buffer[vt0 * 3 + 1],
-                                temp_vertex_texture_buffer[vt0 * 3 + 2],
-                            ),
-                            point3(
-                                temp_vertex_texture_buffer[vt1 * 3],
-                                temp_vertex_texture_buffer[vt1 * 3 + 1],
-                                temp_vertex_texture_buffer[vt1 * 3 + 2],
-                            ),
-                            point3(
-                                temp_vertex_texture_buffer[vt2 * 3],
-                                temp_vertex_texture_buffer[vt2 * 3 + 1],
-                                temp_vertex_texture_buffer[vt2 * 3 + 2],
-                            ),
-                        ];
-                        let tri_normal: [Point3<f32>; 3] = [
-                            point3(
-                                temp_vertex_normal_buffer[vn0 * 3],
-                                temp_vertex_normal_buffer[vn0 * 3 + 1],
-                                temp_vertex_normal_buffer[vn0 * 3 + 2],
-                            ),
-                            point3(
-                                temp_vertex_normal_buffer[vn1 * 3],
-                                temp_vertex_normal_buffer[vn1 * 3 + 1],
-                                temp_vertex_normal_buffer[vn1 * 3 + 2],
-                            ),
-                            point3(
-                                temp_vertex_normal_buffer[vn2 * 3],
-                                temp_vertex_normal_buffer[vn2 * 3 + 1],
-                                temp_vertex_normal_buffer[vn2 * 3 + 2],
-                            ),
-                        ];
+                        let tri_texture: [Point3<f32>; 3];
+                        if let (Some(vt0), Some(vt1), Some(vt2)) = (vt0, vt1, vt2) {
+                            tri_texture = [
+                                point3(
+                                    temp_vertex_texture_buffer[vt0 * 3],
+                                    temp_vertex_texture_buffer[vt0 * 3 + 1],
+                                    temp_vertex_texture_buffer[vt0 * 3 + 2],
+                                ),
+                                point3(
+                                    temp_vertex_texture_buffer[vt1 * 3],
+                                    temp_vertex_texture_buffer[vt1 * 3 + 1],
+                                    temp_vertex_texture_buffer[vt1 * 3 + 2],
+                                ),
+                                point3(
+                                    temp_vertex_texture_buffer[vt2 * 3],
+                                    temp_vertex_texture_buffer[vt2 * 3 + 1],
+                                    temp_vertex_texture_buffer[vt2 * 3 + 2],
+                                ),
+                            ];
+                        } else {
+                            tri_texture =
+                                [point3(1., 1., 1.), point3(1., 1., 1.), point3(1., 1., 1.)];
+                        }
+                        let tri_normal: [Point3<f32>; 3];
+                        if let (Some(vn0), Some(vn1), Some(vn2)) = (vn0, vn1, vn2) {
+                            tri_normal = [
+                                point3(
+                                    temp_vertex_normal_buffer[vn0 * 3],
+                                    temp_vertex_normal_buffer[vn0 * 3 + 1],
+                                    temp_vertex_normal_buffer[vn0 * 3 + 2],
+                                ),
+                                point3(
+                                    temp_vertex_normal_buffer[vn1 * 3],
+                                    temp_vertex_normal_buffer[vn1 * 3 + 1],
+                                    temp_vertex_normal_buffer[vn1 * 3 + 2],
+                                ),
+                                point3(
+                                    temp_vertex_normal_buffer[vn2 * 3],
+                                    temp_vertex_normal_buffer[vn2 * 3 + 1],
+                                    temp_vertex_normal_buffer[vn2 * 3 + 2],
+                                ),
+                            ];
+                        } else {
+                            tri_normal =
+                                [point3(1., 1., 1.), point3(1., 1., 1.), point3(1., 1., 1.)];
+                        }
                         tri_positions.push(tri_position);
                         tri_textures.push(tri_texture);
                         tri_normals.push(tri_normal);
