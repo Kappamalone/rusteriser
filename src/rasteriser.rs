@@ -1,3 +1,4 @@
+use crate::Color;
 use crate::ObjData;
 use cgmath::perspective;
 use cgmath::point2;
@@ -7,8 +8,10 @@ use cgmath::vec4;
 use cgmath::Angle;
 use cgmath::Deg;
 use cgmath::InnerSpace;
+use cgmath::Matrix;
 use cgmath::Point2;
 use cgmath::Point3;
+use cgmath::Transform;
 use cgmath::Vector3;
 use rand::Rng;
 
@@ -17,13 +20,14 @@ use rand::Rng;
 pub struct TriangleData {
     pub position: [Point3<f32>; 3],
     pub texture: [Point3<f32>; 3],
-    pub normal: [Vector3<f32>; 3],
+    pub normal: Option<[Vector3<f32>; 3]>,
 }
 
 pub enum TriangleShading {
     Points,
     Wireframe,
     Flat,
+    Gouraud,
 }
 
 pub struct Rasteriser {
@@ -71,6 +75,7 @@ impl Rasteriser {
                                                             0.,0.,1.,0.,
                                                             0.,0.,-2.,1.,);
             for mut obj in self.loaded_objs.clone() {
+                let has_normals = obj.tri_normals.is_some();
                 for i in 0..obj.len() {
                     // vertex shader?
                     let rcol0 = vec4(Deg::cos(Deg(ANGLE)), 0., Deg::sin(Deg(ANGLE)), 0.);
@@ -81,35 +86,48 @@ impl Rasteriser {
                         z: rcol2,
                         w: rcol3,
                     };
+                    let transformation_matrix = translation_matrix * rotation_matrix;
 
                     for i in obj.tri_positions[i].iter_mut() {
                         *i = Point3::<f32>::from_homogeneous(
-                            translation_matrix * rotation_matrix * (*i).to_homogeneous(),
+                            transformation_matrix * (*i).to_homogeneous(),
                         );
                     }
-                    for i in obj.tri_normals[i].iter_mut() {
-                        let v = cgmath::Vector4 {
-                            x: (*i).x,
-                            y: (*i).y,
-                            z: (*i).z,
-                            w: 1.,
-                        };
-                        let o = translation_matrix * rotation_matrix * v;
-                        *i = Vector3 {
-                            x: o.x,
-                            y: o.y,
-                            z: o.z,
-                        };
+                    // TODO: make this less ugly
+                    if has_normals {
+                        for i in obj.tri_normals.as_mut().unwrap()[i].iter_mut() {
+                            let v = cgmath::Vector4 {
+                                x: (*i).x,
+                                y: (*i).y,
+                                z: (*i).z,
+                                w: 0.,
+                            };
+                            let o = transformation_matrix
+                                .inverse_transform()
+                                .unwrap()
+                                .transpose()
+                                * v;
+                            *i = Vector3 {
+                                x: o.x,
+                                y: o.y,
+                                z: o.z,
+                            }
+                        }
                     }
                     // vertex shader //
 
                     let tri = TriangleData {
                         position: obj.tri_positions[i],
                         texture: obj.tri_textures[i],
-                        normal: obj.tri_normals[i],
+                        normal: if has_normals {
+                            Some(obj.tri_normals.as_ref().unwrap()[i])
+                        } else {
+                            None
+                        },
                     };
 
-                    self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
+                    self.draw_triangle(tri, TriangleShading::Gouraud);
+                    //self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
             ANGLE += 1.;
@@ -156,12 +174,16 @@ impl Rasteriser {
         }
     }
 
-    fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
+    fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading) {
+        let color = Color::new(1., 1., 1.);
+        let coloru32 = color.get_pixel_color();
         // normal must be calculated before persp projection
         // This is flat shading
         // light intensity
         // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
         let light_dir = vec3(0., 0., -1.).normalize();
+        // let light_dir = vec3(0., 8., -5.).normalize();
+        let unchanged_tri_position = tri.position.clone();
         // FIXME: why you no work
         // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
         let c: f32 = 5.;
@@ -207,15 +229,15 @@ impl Rasteriser {
                 }
                 self.draw_pixel(
                     self.calculate_coord(tri.position[0].x as usize, tri.position[0].y as usize),
-                    color,
+                    coloru32,
                 );
                 self.draw_pixel(
                     self.calculate_coord(tri.position[1].x as usize, tri.position[1].y as usize),
-                    color,
+                    coloru32,
                 );
                 self.draw_pixel(
                     self.calculate_coord(tri.position[2].x as usize, tri.position[2].y as usize),
-                    color,
+                    coloru32,
                 );
             }
             TriangleShading::Wireframe => {
@@ -229,24 +251,24 @@ impl Rasteriser {
                     tri.position[0].y as usize,
                     tri.position[1].x as usize,
                     tri.position[1].y as usize,
-                    color,
+                    coloru32,
                 );
                 self.draw_line(
                     tri.position[1].x as usize,
                     tri.position[1].y as usize,
                     tri.position[2].x as usize,
                     tri.position[2].y as usize,
-                    color,
+                    coloru32,
                 );
                 self.draw_line(
                     tri.position[2].x as usize,
                     tri.position[2].y as usize,
                     tri.position[0].x as usize,
                     tri.position[0].y as usize,
-                    color,
+                    coloru32,
                 );
             }
-            TriangleShading::Flat => {
+            TriangleShading::Flat | TriangleShading::Gouraud => {
                 //TODO: unsafe unwrap?
 
                 // Computes triangle bounding box and clips against screen bounds
@@ -299,28 +321,42 @@ impl Rasteriser {
                         w2 /= area;
                         // TODO: https://learnopengl.com/Advanced-Lighting/Gamma-Correction
                         let gamma = 2.2;
-                        // FIXME: This is quicker than adjusting for each channel individually, but also inaccurate ie
-                        // channel * (intensity ^ gamma) != (channel * intensity) ^ (1/gamma)
-                        let normal = tri.normal[2] * w0 + tri.normal[0] * w1 + tri.normal[1] * w2;
+
+                        let normal: Vector3<f32>;
+                        match triangle_type {
+                            TriangleShading::Flat => {
+                                normal = (unchanged_tri_position[2] - unchanged_tri_position[0])
+                                    .cross(unchanged_tri_position[1] - unchanged_tri_position[0])
+                                    .normalize();
+                            }
+                            TriangleShading::Gouraud => {
+                                // why negative?
+                                if let Some(n) = tri.normal {
+                                    normal = -(n[2] * w0 + n[0] * w1 + n[1] * w2);
+                                } else {
+                                    panic!("How do you gouraud shade without vertex normals from .obj file?")
+                                }
+                            }
+                            _ => panic!("Invalid triangle shading type!"),
+                        }
                         let intensity = normal.dot(light_dir).powf(gamma);
                         // back-face culling
                         if intensity <= 0. {
                             return;
                         }
-                        let color = (((color >> 16 & 0xff) as f32 * intensity) as u32) << 16
-                            | (((color >> 8 & 0xff) as f32 * intensity) as u32) << 8
-                            | (((color & 0xff) as f32 * intensity) as u32);
 
-                        // HACK: is this correct?
+                        let mut c = color;
+                        c.modify_intensity(intensity);
+
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z
                             + w2 * tri.position[1].z;
-
                         let coord = self.calculate_coord(x as usize, y as usize);
                         // +z is towards us
+                        // TODO: figure out how to render zbuffer
                         if zdepth > self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
-                            self.draw_pixel(coord, color);
+                            self.draw_pixel(coord, c.get_pixel_color());
                         }
                     }
                 }

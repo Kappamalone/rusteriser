@@ -1,7 +1,9 @@
+mod color;
 mod frontend_minifb;
 mod obj_parser;
 mod rasteriser;
-use crate::frontend_minifb::Frontend;
+use color::*;
+use frontend_minifb::Frontend;
 use obj_parser::*;
 use rasteriser::*;
 
@@ -13,7 +15,7 @@ pub fn main() {
     const HEIGHT: usize = 1000;
     let mut r = Rasteriser::new(WIDTH, HEIGHT);
     r.load_obj("./models/african_head.obj");
-    // r.load_obj("./models/teapot.obj");
+    //r.load_obj("./models/teapot.obj");
     let mut frontend = Frontend::new(WIDTH, HEIGHT, r);
     frontend.run();
 }

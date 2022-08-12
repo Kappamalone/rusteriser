@@ -12,7 +12,7 @@ pub struct ObjData {
     // Triplet of vertices, Triplet of normals, Texture coords
     pub tri_positions: Vec<[Point3<f32>; 3]>,
     pub tri_textures: Vec<[Point3<f32>; 3]>,
-    pub tri_normals: Vec<[Vector3<f32>; 3]>,
+    pub tri_normals: Option<Vec<[Vector3<f32>; 3]>>,
 }
 
 impl ObjData {
@@ -29,7 +29,7 @@ impl ObjData {
         // The actual data
         let mut tri_positions: Vec<[Point3<f32>; 3]> = Vec::new();
         let mut tri_textures: Vec<[Point3<f32>; 3]> = Vec::new();
-        let mut tri_normals: Vec<[Vector3<f32>; 3]> = Vec::new();
+        let mut tri_normals: Option<Vec<[Vector3<f32>; 3]>> = Some(Vec::new());
 
         let file = File::open(obj_path).unwrap();
         let reader = BufReader::new(file);
@@ -103,7 +103,6 @@ impl ObjData {
                         let mut vn2: Option<usize> = None;
                         match slash_frequency {
                             0 => {
-                                // FIXME: calulcate vn, fill vt with empty references
                                 v0 = faces[1].parse::<usize>().unwrap() - 1;
                                 v1 = faces[2].parse::<usize>().unwrap() - 1;
                                 v2 = faces[3].parse::<usize>().unwrap() - 1;
@@ -172,27 +171,28 @@ impl ObjData {
                                     temp_vertex_normal_buffer[vn0 * 3],
                                     temp_vertex_normal_buffer[vn0 * 3 + 1],
                                     temp_vertex_normal_buffer[vn0 * 3 + 2],
-                                ),
+                                )
+                                .normalize(),
                                 vec3(
                                     temp_vertex_normal_buffer[vn1 * 3],
                                     temp_vertex_normal_buffer[vn1 * 3 + 1],
                                     temp_vertex_normal_buffer[vn1 * 3 + 2],
-                                ),
+                                )
+                                .normalize(),
                                 vec3(
                                     temp_vertex_normal_buffer[vn2 * 3],
                                     temp_vertex_normal_buffer[vn2 * 3 + 1],
                                     temp_vertex_normal_buffer[vn2 * 3 + 2],
-                                ),
+                                )
+                                .normalize(),
                             ];
+                            tri_normals.as_mut().unwrap().push(tri_normal);
                         } else {
-                            let normal = (tri_position[2] - tri_position[0])
-                                .cross(tri_position[1] - tri_position[0])
-                                .normalize();
-                            tri_normal = [normal, normal, normal];
+                            tri_normals = None;
                         }
+
                         tri_positions.push(tri_position);
                         tri_textures.push(tri_texture);
-                        tri_normals.push(tri_normal);
                     }
                     '#' => println!(".obj file comment: {}", line),
                     _ => println!("Unhandled obj expression: {}", line), // should panic!() instead
@@ -201,11 +201,10 @@ impl ObjData {
         }
 
         assert!(
-            tri_positions.len() == tri_textures.len() && tri_textures.len() == tri_normals.len(),
-            "Incorrect parsing of position/normals/textures: {} {} {}",
+            tri_positions.len() == tri_textures.len(),
+            "Incorrect parsing of position/normals/textures: {} {}",
             tri_positions.len(),
             tri_textures.len(),
-            tri_normals.len()
         );
 
         ObjData {
