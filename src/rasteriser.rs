@@ -9,6 +9,7 @@ use cgmath::Deg;
 use cgmath::InnerSpace;
 use cgmath::Point2;
 use cgmath::Point3;
+use cgmath::Vector3;
 use rand::Rng;
 
 // To interface with the rasteriser
@@ -16,7 +17,7 @@ use rand::Rng;
 pub struct TriangleData {
     pub position: [Point3<f32>; 3],
     pub texture: [Point3<f32>; 3],
-    pub normal: [Point3<f32>; 3],
+    pub normal: [Vector3<f32>; 3],
 }
 
 pub enum TriangleShading {
@@ -68,7 +69,7 @@ impl Rasteriser {
             let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
                                                             0.,1.,0.,0.,
                                                             0.,0.,1.,0.,
-                                                            0.,-3.,-5.,1.,);
+                                                            0.,0.,-2.,1.,);
             for mut obj in self.loaded_objs.clone() {
                 for i in 0..obj.len() {
                     // vertex shader?
@@ -85,6 +86,20 @@ impl Rasteriser {
                         *i = Point3::<f32>::from_homogeneous(
                             translation_matrix * rotation_matrix * (*i).to_homogeneous(),
                         );
+                    }
+                    for i in obj.tri_normals[i].iter_mut() {
+                        let v = cgmath::Vector4 {
+                            x: (*i).x,
+                            y: (*i).y,
+                            z: (*i).z,
+                            w: 1.,
+                        };
+                        let o = translation_matrix * rotation_matrix * v;
+                        *i = Vector3 {
+                            x: o.x,
+                            y: o.y,
+                            z: o.z,
+                        };
                     }
                     // vertex shader //
 
@@ -142,29 +157,14 @@ impl Rasteriser {
     }
 
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading, color: u32) {
+        // normal must be calculated before persp projection
         // This is flat shading
         // light intensity
         // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
         let light_dir = vec3(0., 0., -1.).normalize();
-        let normal = (tri.position[2] - tri.position[0])
-            .cross(tri.position[1] - tri.position[0])
-            .normalize();
-        // TODO: https://learnopengl.com/Advanced-Lighting/Gamma-Correction
-        let gamma = 2.2;
-        // FIXME: This is quicker than adjusting for each channel individually, but also inaccurate ie
-        // channel * (intensity ^ gamma) != (channel * intensity) ^ (1/gamma)
-        let intensity = normal.dot(light_dir).powf(gamma);
-        // back-face culling
-        if intensity <= 0. {
-            return;
-        }
-        let color = (((color >> 16 & 0xff) as f32 * intensity) as u32) << 16
-            | (((color >> 8 & 0xff) as f32 * intensity) as u32) << 8
-            | (((color & 0xff) as f32 * intensity) as u32);
-
         // FIXME: why you no work
         // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
-        let c: f32 = 1.;
+        let c: f32 = 5.;
         #[rustfmt::skip]
         let projection_matrix = cgmath::Matrix4::new(   1.,0.,0.,0.,
                                                         0.,1.,0.,0.,
@@ -252,7 +252,7 @@ impl Rasteriser {
                 // Computes triangle bounding box and clips against screen bounds
                 let tri_position_integer = tri
                     .position
-                    .map(|p| point3(p.x.round() as i32, p.y.round() as i32, p.z as i32));
+                    .map(|p| point3(p.x as i32, p.y as i32, p.z as i32));
 
                 let min_x: i32 = std::cmp::max(
                     0,
@@ -297,6 +297,20 @@ impl Rasteriser {
                         w0 /= area;
                         w1 /= area;
                         w2 /= area;
+                        // TODO: https://learnopengl.com/Advanced-Lighting/Gamma-Correction
+                        let gamma = 2.2;
+                        // FIXME: This is quicker than adjusting for each channel individually, but also inaccurate ie
+                        // channel * (intensity ^ gamma) != (channel * intensity) ^ (1/gamma)
+                        let normal = tri.normal[2] * w0 + tri.normal[0] * w1 + tri.normal[1] * w2;
+                        let intensity = normal.dot(light_dir).powf(gamma);
+                        // back-face culling
+                        if intensity <= 0. {
+                            return;
+                        }
+                        let color = (((color >> 16 & 0xff) as f32 * intensity) as u32) << 16
+                            | (((color >> 8 & 0xff) as f32 * intensity) as u32) << 8
+                            | (((color & 0xff) as f32 * intensity) as u32);
+
                         // HACK: is this correct?
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z

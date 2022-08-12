@@ -1,5 +1,8 @@
 use cgmath::point3;
+use cgmath::vec3;
+use cgmath::InnerSpace;
 use cgmath::Point3;
+use cgmath::Vector3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -9,7 +12,7 @@ pub struct ObjData {
     // Triplet of vertices, Triplet of normals, Texture coords
     pub tri_positions: Vec<[Point3<f32>; 3]>,
     pub tri_textures: Vec<[Point3<f32>; 3]>,
-    pub tri_normals: Vec<[Point3<f32>; 3]>,
+    pub tri_normals: Vec<[Vector3<f32>; 3]>,
 }
 
 impl ObjData {
@@ -26,7 +29,7 @@ impl ObjData {
         // The actual data
         let mut tri_positions: Vec<[Point3<f32>; 3]> = Vec::new();
         let mut tri_textures: Vec<[Point3<f32>; 3]> = Vec::new();
-        let mut tri_normals: Vec<[Point3<f32>; 3]> = Vec::new();
+        let mut tri_normals: Vec<[Vector3<f32>; 3]> = Vec::new();
 
         let file = File::open(obj_path).unwrap();
         let reader = BufReader::new(file);
@@ -162,28 +165,30 @@ impl ObjData {
                             tri_texture =
                                 [point3(1., 1., 1.), point3(1., 1., 1.), point3(1., 1., 1.)];
                         }
-                        let tri_normal: [Point3<f32>; 3];
+                        let tri_normal: [Vector3<f32>; 3];
                         if let (Some(vn0), Some(vn1), Some(vn2)) = (vn0, vn1, vn2) {
                             tri_normal = [
-                                point3(
+                                vec3(
                                     temp_vertex_normal_buffer[vn0 * 3],
                                     temp_vertex_normal_buffer[vn0 * 3 + 1],
                                     temp_vertex_normal_buffer[vn0 * 3 + 2],
                                 ),
-                                point3(
+                                vec3(
                                     temp_vertex_normal_buffer[vn1 * 3],
                                     temp_vertex_normal_buffer[vn1 * 3 + 1],
                                     temp_vertex_normal_buffer[vn1 * 3 + 2],
                                 ),
-                                point3(
+                                vec3(
                                     temp_vertex_normal_buffer[vn2 * 3],
                                     temp_vertex_normal_buffer[vn2 * 3 + 1],
                                     temp_vertex_normal_buffer[vn2 * 3 + 2],
                                 ),
                             ];
                         } else {
-                            tri_normal =
-                                [point3(1., 1., 1.), point3(1., 1., 1.), point3(1., 1., 1.)];
+                            let normal = (tri_position[2] - tri_position[0])
+                                .cross(tri_position[1] - tri_position[0])
+                                .normalize();
+                            tri_normal = [normal, normal, normal];
                         }
                         tri_positions.push(tri_position);
                         tri_textures.push(tri_texture);
