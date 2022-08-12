@@ -177,13 +177,12 @@ impl Rasteriser {
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading) {
         let color = Color::new(1., 1., 1.);
         let coloru32 = color.get_pixel_color();
-        // normal must be calculated before persp projection
-        // This is flat shading
+
+        // (flat shading) normal must be calculated before persp projection
         // light intensity
-        // let light_dir = vec3(-0.3, -0.9, -0.4).normalize();
         let light_dir = vec3(0., 0., -1.).normalize();
-        // let light_dir = vec3(0., 8., -5.).normalize();
-        let unchanged_tri_position = tri.position.clone();
+        let unchanged_tri_position = tri.position;
+
         // FIXME: why you no work
         // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
         let c: f32 = 5.;
