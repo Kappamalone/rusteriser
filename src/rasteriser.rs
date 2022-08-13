@@ -73,7 +73,7 @@ impl Rasteriser {
             let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
                                                             0.,1.,0.,0.,
                                                             0.,0.,1.,0.,
-                                                            0.,0.,-2.,1.,);
+                                                            0.,-1.,-1.,1.,);
             for mut obj in self.loaded_objs.clone() {
                 let has_normals = obj.tri_normals.is_some();
                 for i in 0..obj.len() {
@@ -126,7 +126,7 @@ impl Rasteriser {
                         },
                     };
 
-                    self.draw_triangle(tri, TriangleShading::Gouraud);
+                    self.draw_triangle(tri, TriangleShading::Flat);
                     //self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
@@ -318,6 +318,8 @@ impl Rasteriser {
                         w0 /= area;
                         w1 /= area;
                         w2 /= area;
+
+                        // Shading
                         // TODO: https://learnopengl.com/Advanced-Lighting/Gamma-Correction
                         let gamma = 2.2;
 
@@ -344,8 +346,16 @@ impl Rasteriser {
                             return;
                         }
 
+                        // Texturing
+                        let u =
+                            w0 * tri.texture[2].x + w1 * tri.texture[0].x + w2 * tri.texture[1].x;
+                        let v =
+                            w0 * tri.texture[2].y + w1 * tri.texture[0].y + w2 * tri.texture[1].y;
+                        // Texturing //
+
                         let mut c = color;
                         c.modify_intensity(intensity);
+                        // Shading //
 
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z

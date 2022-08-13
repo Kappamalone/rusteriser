@@ -6,12 +6,18 @@ use cgmath::Vector3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
+struct TextureAndCoordinates {
+    texture_data: Vec<u32>,
+    texture_coordinates: Vec<[Point3<f32>; 3]>,
+}
+
 // Holds all data corresponding to a loaded obj
 #[derive(Clone)]
 pub struct ObjData {
     // Triplet of vertices, Triplet of normals, Texture coords
     pub tri_positions: Vec<[Point3<f32>; 3]>,
     pub tri_textures: Vec<[Point3<f32>; 3]>,
+    // pub tri_textures: Vec<TextureAndCoordinates>,
     pub tri_normals: Option<Vec<[Vector3<f32>; 3]>>,
 }
 
@@ -87,7 +93,7 @@ impl ObjData {
                         _ => println!("Unhandled obj expression: {}", line),
                     },
                     'f' => {
-                        let faces: Vec<&str> = line.split(' ').collect();
+                        let faces: Vec<&str> = line.split_whitespace().collect();
                         let slash_frequency: usize = faces
                             .iter()
                             .map(|x| x.chars().filter(|y| *y == '/').count())
@@ -106,6 +112,17 @@ impl ObjData {
                                 v0 = faces[1].parse::<usize>().unwrap() - 1;
                                 v1 = faces[2].parse::<usize>().unwrap() - 1;
                                 v2 = faces[3].parse::<usize>().unwrap() - 1;
+                            }
+                            3 => {
+                                let group0 = faces[1].split('/').collect::<Vec<&str>>();
+                                let group1 = faces[2].split('/').collect::<Vec<&str>>();
+                                let group2 = faces[3].split('/').collect::<Vec<&str>>();
+                                v0 = group0[0].parse::<usize>().unwrap() - 1;
+                                v1 = group1[0].parse::<usize>().unwrap() - 1;
+                                v2 = group2[0].parse::<usize>().unwrap() - 1;
+                                vt0 = Some(group0[1].parse::<usize>().unwrap() - 1);
+                                vt1 = Some(group1[1].parse::<usize>().unwrap() - 1);
+                                vt2 = Some(group2[1].parse::<usize>().unwrap() - 1);
                             }
                             6 => {
                                 // FIXME: probably breaks with v//vn format
