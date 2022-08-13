@@ -5,19 +5,41 @@ use cgmath::Point3;
 use cgmath::Vector3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 
-struct TextureAndCoordinates {
-    texture_data: Vec<u32>,
-    texture_coordinates: Vec<[Point3<f32>; 3]>,
+// TODO: in order to handle different texture types, I'll have to
+// parse the .mtl file associated with the .obj and set up a map
+// of texture names to texture types (this has to be handled inside ObjData)
+
+#[derive(Clone, Copy)]
+pub struct TextureIndex {
+    pub diffuse_idx: usize,
+    // other texture indexes should be Options, as they might not exist
 }
+
+impl TextureIndex {
+    fn new(diffuse_idx: usize) -> TextureIndex {
+        TextureIndex { diffuse_idx }
+    }
+}
+
+// TODO: is this an appropriate use of a tuple struct, or is a regular struct better?
+// Stores the texture coordinates [u,v,(w?)] and
+// index into correct (diffuse) texture
+// when drawing triangles, we can use the texture index to supply a reference
+// to the needed (diffuse) texture
+#[derive(Clone, Copy)]
+pub struct TextureInfo(pub TextureIndex, pub [Point3<f32>; 3]);
 
 // Holds all data corresponding to a loaded obj
 #[derive(Clone)]
 pub struct ObjData {
     // Triplet of vertices, Triplet of normals, Texture coords
     pub tri_positions: Vec<[Point3<f32>; 3]>,
-    pub tri_textures: Vec<[Point3<f32>; 3]>,
-    // pub tri_textures: Vec<TextureAndCoordinates>,
+
+    // pub tri_textures: Vec<[Point3<f32>; 3]>,
+    pub tri_textures: Option<Vec<TextureInfo>>,
+    pub diffuse_textures: Vec<Vec<u8>>,
     pub tri_normals: Option<Vec<[Vector3<f32>; 3]>>,
 }
 
@@ -34,8 +56,10 @@ impl ObjData {
 
         // The actual data
         let mut tri_positions: Vec<[Point3<f32>; 3]> = Vec::new();
-        let mut tri_textures: Vec<[Point3<f32>; 3]> = Vec::new();
+        let mut tri_textures: Option<Vec<TextureInfo>> = Some(Vec::new());
         let mut tri_normals: Option<Vec<[Vector3<f32>; 3]>> = Some(Vec::new());
+        let mut texture_index: Option<TextureIndex> = None;
+        let mut diffuse_textures: Vec<Vec<u8>> = Vec::new();
 
         let file = File::open(obj_path).unwrap();
         let reader = BufReader::new(file);
@@ -48,6 +72,43 @@ impl ObjData {
             // `Some(i)`, evaluate the block (`{}`).
             if let Some(id) = line.chars().nth(0) {
                 match id {
+                    'u' => {
+                        // usemtl
+                        let texture = line.split_whitespace().collect::<Vec<&str>>()[1];
+                        let obj_dir = Path::new(obj_path).parent().unwrap().to_str().unwrap();
+                        let texture_path = Path::new(".").join(obj_dir).join(texture);
+                        let file_type = Path::new(&texture_path)
+                            .extension()
+                            .unwrap()
+                            .to_str()
+                            .unwrap();
+
+                        println!("Loaded texture: {:?} {}", texture_path, file_type);
+                        if let Some(ref mut texture_index) = texture_index {
+                            texture_index.diffuse_idx += 1;
+                        } else {
+                            texture_index = Some(TextureIndex::new(0));
+                        }
+
+                        // load png data into vector
+                        match file_type {
+                            "png" => {
+                                //TODO: get width-height of png and store it
+                                let decoder = png::Decoder::new(File::open(texture_path).unwrap());
+                                let mut reader = decoder.read_info().unwrap();
+                                // Allocate the output buffer.
+                                // TODO: look into transmuting this to a Vec<u32>
+                                let mut buf = vec![0; reader.output_buffer_size()];
+                                println!("{}", reader.output_buffer_size());
+                                // Read the next frame. An APNG might contain multiple frames.
+                                let info = reader.next_frame(&mut buf).unwrap();
+                                // Grab the bytes of the image.
+                                let bytes = &buf[..info.buffer_size()];
+                                println!("{:?}", bytes);
+                            }
+                            _ => panic!("unhandled texture file type!"),
+                        }
+                    }
                     'v' => match line.chars().nth(1).unwrap() {
                         ' ' => {
                             let vertexes: Vec<&str> = line.split_whitespace().collect();
@@ -125,7 +186,7 @@ impl ObjData {
                                 vt2 = Some(group2[1].parse::<usize>().unwrap() - 1);
                             }
                             6 => {
-                                // FIXME: probably breaks with v//vn format
+                                // FIXME: breaks with v//vn format
                                 let group0 = faces[1].split('/').collect::<Vec<&str>>();
                                 let group1 = faces[2].split('/').collect::<Vec<&str>>();
                                 let group2 = faces[3].split('/').collect::<Vec<&str>>();
@@ -141,6 +202,7 @@ impl ObjData {
                             }
                             _ => panic!("Unhandled format of faces: {}", line),
                         }
+
                         let tri_position: [Point3<f32>; 3] = [
                             point3(
                                 temp_vertex_buffer[v0 * 3],
@@ -158,6 +220,8 @@ impl ObjData {
                                 temp_vertex_buffer[v2 * 3 + 2],
                             ),
                         ];
+                        tri_positions.push(tri_position);
+
                         let tri_texture: [Point3<f32>; 3];
                         if let (Some(vt0), Some(vt1), Some(vt2)) = (vt0, vt1, vt2) {
                             tri_texture = [
@@ -177,10 +241,14 @@ impl ObjData {
                                     temp_vertex_texture_buffer[vt2 * 3 + 2],
                                 ),
                             ];
+                            tri_textures
+                                .as_mut()
+                                .unwrap()
+                                .push(TextureInfo(texture_index.unwrap(), tri_texture));
                         } else {
-                            tri_texture =
-                                [point3(1., 1., 1.), point3(1., 1., 1.), point3(1., 1., 1.)];
+                            tri_textures = None;
                         }
+
                         let tri_normal: [Vector3<f32>; 3];
                         if let (Some(vn0), Some(vn1), Some(vn2)) = (vn0, vn1, vn2) {
                             tri_normal = [
@@ -207,9 +275,6 @@ impl ObjData {
                         } else {
                             tri_normals = None;
                         }
-
-                        tri_positions.push(tri_position);
-                        tri_textures.push(tri_texture);
                     }
                     '#' => println!(".obj file comment: {}", line),
                     _ => println!("Unhandled obj expression: {}", line), // should panic!() instead
@@ -217,17 +282,11 @@ impl ObjData {
             }
         }
 
-        assert!(
-            tri_positions.len() == tri_textures.len(),
-            "Incorrect parsing of position/normals/textures: {} {}",
-            tri_positions.len(),
-            tri_textures.len(),
-        );
-
         ObjData {
             tri_positions,
             tri_textures,
             tri_normals,
+            diffuse_textures,
         }
     }
 }

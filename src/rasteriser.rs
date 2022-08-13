@@ -118,7 +118,7 @@ impl Rasteriser {
 
                     let tri = TriangleData {
                         position: obj.tri_positions[i],
-                        texture: obj.tri_textures[i],
+                        texture: obj.tri_textures.as_ref().unwrap()[i].1,
                         normal: if has_normals {
                             Some(obj.tri_normals.as_ref().unwrap()[i])
                         } else {
