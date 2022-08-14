@@ -12,6 +12,14 @@ impl Color {
         Color { r, g, b }
     }
 
+    pub fn new_from_rgb(r: u8, g: u8, b: u8) -> Color {
+        Color {
+            r: r as f32 / 255.,
+            g: g as f32 / 255.,
+            b: b as f32 / 255.,
+        }
+    }
+
     pub fn get_pixel_color(&self) -> u32 {
         ((self.r * 255.) as u32) << 16 | ((self.g * 255.) as u32) << 8 | ((self.b * 255.) as u32)
     }

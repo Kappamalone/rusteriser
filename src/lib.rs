@@ -18,7 +18,7 @@ pub fn main() {
     const WIDTH: usize = 1000;
     const HEIGHT: usize = 1000;
     let mut r = Rasteriser::new(WIDTH, HEIGHT);
-    //r.load_obj("./models/african_head.obj");
+    //r.load_obj("./models/african_head.obj"); //TODO: a way to manually supply a texture
     //r.load_obj("./models/teapot.obj");
     //r.load_obj("./models/Ansem_and_Guardian/Ansem_and_Guardian.obj");
     //r.load_obj("./models/Sora_KH1/Sora_KH1.obj");

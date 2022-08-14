@@ -1,7 +1,7 @@
 use crate::Color;
 use crate::ObjData;
-use cgmath::perspective;
-use cgmath::point2;
+use crate::TextureData;
+//use cgmath::perspective;
 use cgmath::point3;
 use cgmath::vec3;
 use cgmath::vec4;
@@ -9,17 +9,17 @@ use cgmath::Angle;
 use cgmath::Deg;
 use cgmath::InnerSpace;
 use cgmath::Matrix;
-use cgmath::Point2;
 use cgmath::Point3;
 use cgmath::Transform;
 use cgmath::Vector3;
-use rand::Rng;
+//use rand::Rng;
 
 // To interface with the rasteriser
-#[derive(Clone, Copy)]
-pub struct TriangleData {
+// TODO: remove Option<>
+#[derive(Clone)]
+pub struct TriangleData<'a> {
     pub position: [Point3<f32>; 3],
-    pub texture: [Point3<f32>; 3],
+    pub texture: Option<&'a TextureData>,
     pub normal: Option<[Vector3<f32>; 3]>,
 }
 
@@ -76,6 +76,7 @@ impl Rasteriser {
                                                             0.,-1.,-1.,1.,);
             for mut obj in self.loaded_objs.clone() {
                 let has_normals = obj.tri_normals.is_some();
+                let has_textures: bool = obj.tri_textures.is_some();
                 for i in 0..obj.len() {
                     // vertex shader?
                     let rcol0 = vec4(Deg::cos(Deg(ANGLE)), 0., Deg::sin(Deg(ANGLE)), 0.);
@@ -118,7 +119,11 @@ impl Rasteriser {
 
                     let tri = TriangleData {
                         position: obj.tri_positions[i],
-                        texture: obj.tri_textures.as_ref().unwrap()[i].1,
+                        texture: if has_textures {
+                            Some(&obj.tri_textures.as_ref().unwrap()[i])
+                        } else {
+                            None
+                        },
                         normal: if has_normals {
                             Some(obj.tri_normals.as_ref().unwrap()[i])
                         } else {
@@ -127,7 +132,6 @@ impl Rasteriser {
                     };
 
                     self.draw_triangle(tri, TriangleShading::Flat);
-                    //self.draw_triangle(tri, TriangleShading::Flat, 0xffffff);
                 }
             }
             ANGLE += 1.;
@@ -347,25 +351,36 @@ impl Rasteriser {
                         }
 
                         // Texturing
-                        let u =
-                            w0 * tri.texture[2].x + w1 * tri.texture[0].x + w2 * tri.texture[1].x;
-                        let v =
-                            w0 * tri.texture[2].y + w1 * tri.texture[0].y + w2 * tri.texture[1].y;
+                        let texture_data = tri.texture.as_ref().unwrap();
+                        let texture = &texture_data.texture;
+                        let texcoords = texture_data.points;
+                        let u = ((w0 * texcoords[2].x + w1 * texcoords[0].x + w2 * texcoords[1].x)
+                            * texture_data.width as f32) as usize;
+                        let v = ((w0 * texcoords[2].y + w1 * texcoords[0].y + w2 * texcoords[1].y)
+                            * texture_data.height as f32) as usize;
+
+                        // let idx = u * 4 + v * 4 * texture_data.width
+                        let idx = (texture_data.width * texture_data.height * 4)
+                            - ((texture_data.width * 4 - u * 4) + (v * 4 * (texture_data.width)));
+                        let mut color =
+                            Color::new_from_rgb(texture[idx], texture[idx + 1], texture[idx + 2]);
                         // Texturing //
 
-                        let mut c = color;
-                        c.modify_intensity(intensity);
+                        //color.modify_intensity(intensity);
                         // Shading //
+                        // TODOS:
+                        // -> learn about rc and lifetimes
+                        // -> why are textures inverted vertically and horizontally?
 
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z
                             + w2 * tri.position[1].z;
                         let coord = self.calculate_coord(x as usize, y as usize);
                         // +z is towards us
-                        // TODO: figure out how to render zbuffer
+                        // TODO: render zbuffer
                         if zdepth > self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
-                            self.draw_pixel(coord, c.get_pixel_color());
+                            self.draw_pixel(coord, color.get_pixel_color());
                         }
                     }
                 }
