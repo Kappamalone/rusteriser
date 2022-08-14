@@ -94,17 +94,9 @@ impl ObjData {
                                 let decoder = png::Decoder::new(File::open(texture_path).unwrap());
                                 let mut reader = decoder.read_info().unwrap();
                                 // Allocate the output buffer.
-                                let mut buf = Rc::new(vec![0; reader.output_buffer_size()]);
+                                let mut buf = vec![0; reader.output_buffer_size()];
                                 // Read the next frame. An APNG might contain multiple frames.
-                                let png_info =
-                                    reader.next_frame(Rc::get_mut(&mut buf).unwrap()).unwrap();
-                                // FIXME? I'm not super confident on how Rc<> works, but this
-                                // Rc::clone isn't redundant right?
-                                current_texture_info = Some(CurrentTextureData(
-                                    Rc::clone(&buf),
-                                    png_info.width as usize,
-                                    png_info.height as usize,
-                                ));
+                                let png_info = reader.next_frame(&mut buf).unwrap();
 
                                 assert!(
                                     png_info.bit_depth == png::BitDepth::Eight,
@@ -114,8 +106,31 @@ impl ObjData {
                                     png_info.color_type == png::ColorType::Rgba,
                                     "PNG color type not rgba!"
                                 );
+
+                                let mut bytes = vec![0; png_info.buffer_size()];
+                                // this makes origin bottom left instead of top left
+                                for y in 0..png_info.height as usize {
+                                    for x in 0..png_info.width as usize {
+                                        let idx_transform = x * 4 + y * png_info.width as usize * 4;
+                                        let idx_original = x * 4
+                                            + (png_info.height as usize - y - 1)
+                                                * png_info.width as usize
+                                                * 4;
+                                        for i in 0..3 {
+                                            bytes[idx_transform + i] = buf[idx_original + i];
+                                        }
+                                    }
+                                }
+
+                                let texture = Rc::new(bytes);
+                                current_texture_info = Some(CurrentTextureData(
+                                    Rc::clone(&texture),
+                                    png_info.width as usize,
+                                    png_info.height as usize,
+                                ));
+
                                 println!("png metadata: {:?}", png_info);
-                                textures.push(buf);
+                                textures.push(texture);
                             }
                             _ => panic!("unhandled texture file type!"),
                         }

@@ -140,11 +140,10 @@ impl Rasteriser {
 
     #[inline(always)]
     fn calculate_coord(&self, x: usize, y: usize) -> usize {
-        // this performs a horizontal and vertical flip on our pixel position
-        // to account for the way the framebuffer is layed out in memory
-        // let coord = (self.width * self.height) - ((self.width - p.x) + p.y * self.width);
-        // FIXME: I'm confused, but this makes it so that +x is right, +y is up, and +z is towards
-        // us like opengl
+        // this makes the origin bottom left instead of top left (top left is the way the
+        // framebuffer is laid out in memory)
+        // TODO: would it be faster to not do this calculation and instead transform the frambuffer
+        // every frame?
         (self.width * self.height) - ((self.width - x) + y * self.width)
     }
 
@@ -359,18 +358,21 @@ impl Rasteriser {
                         let v = ((w0 * texcoords[2].y + w1 * texcoords[0].y + w2 * texcoords[1].y)
                             * texture_data.height as f32) as usize;
 
-                        // let idx = u * 4 + v * 4 * texture_data.width
-                        let idx = (texture_data.width * texture_data.height * 4)
-                            - ((texture_data.width * 4 - u * 4) + (v * 4 * (texture_data.width)));
-                        let mut color =
-                            Color::new_from_rgb(texture[idx], texture[idx + 1], texture[idx + 2]);
+                        let idx = u * 4 + v * 4 * texture_data.width;
+                        // let idx = (texture_data.width * texture_data.height * 4)
+                        // -((texture_data.width * 4 - u * 4) + (v * 4 * (texture_data.width)));
+                        let mut tex_color = Color::new_from_rgb(
+                            texture[idx + 0],
+                            texture[idx + 1],
+                            texture[idx + 2],
+                        );
                         // Texturing //
-
-                        //color.modify_intensity(intensity);
+                        //tex_color.modify_intensity(intensity);
+                        tex_color.modify_intensity(1.);
                         // Shading //
+                        //
                         // TODOS:
                         // -> learn about rc and lifetimes
-                        // -> why are textures inverted vertically and horizontally?
 
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z
@@ -380,7 +382,7 @@ impl Rasteriser {
                         // TODO: render zbuffer
                         if zdepth > self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
-                            self.draw_pixel(coord, color.get_pixel_color());
+                            self.draw_pixel(coord, tex_color.get_pixel_color());
                         }
                     }
                 }
