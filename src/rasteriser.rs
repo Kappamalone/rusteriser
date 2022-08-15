@@ -1,7 +1,7 @@
 use crate::Color;
 use crate::ObjData;
 use crate::TextureData;
-//use cgmath::perspective;
+use cgmath::perspective;
 use cgmath::point3;
 use cgmath::vec3;
 use cgmath::vec4;
@@ -51,11 +51,11 @@ impl Rasteriser {
 
     pub fn clear_buffers(&mut self) {
         for i in self.buffer.iter_mut() {
-            *i = 0;
+            *i = 0x00;
         }
 
         for i in self.zbuffer.iter_mut() {
-            *i = -std::f32::INFINITY;
+            *i = std::f32::INFINITY;
         }
     }
 
@@ -73,7 +73,7 @@ impl Rasteriser {
             let translation_matrix = cgmath::Matrix4::new(  1.,0.,0.,0.,
                                                             0.,1.,0.,0.,
                                                             0.,0.,1.,0.,
-                                                            0.,-1.,-1.,1.,);
+                                                            0.,0.,0.,1.,);
             for mut obj in self.loaded_objs.clone() {
                 let has_normals = obj.tri_normals.is_some();
                 let has_textures: bool = obj.tri_textures.is_some();
@@ -178,7 +178,7 @@ impl Rasteriser {
     }
 
     fn draw_triangle(&mut self, mut tri: TriangleData, triangle_type: TriangleShading) {
-        let color = Color::new(1., 1., 1.);
+        let mut color = Color::new(1., 1., 1.);
         let coloru32 = color.get_pixel_color();
 
         // (flat shading) normal must be calculated before persp projection
@@ -186,14 +186,7 @@ impl Rasteriser {
         let light_dir = vec3(0., 0., -1.).normalize();
         let unchanged_tri_position = tri.position;
 
-        // FIXME: why you no work
-        // let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
-        let c: f32 = 5.;
-        #[rustfmt::skip]
-        let projection_matrix = cgmath::Matrix4::new(   1.,0.,0.,0.,
-                                                        0.,1.,0.,0.,
-                                                        0.,0.,1.,-1./c,
-                                                        0.,0.,0.,1.,);
+        let projection_matrix = perspective(Deg(90.), (self.width / self.height) as f32, 0.1, 100.);
 
         // cumulative model matrix = translation * rotation * scale * vector
         // screen space matrix = viewport * projection * camera * model
@@ -350,39 +343,63 @@ impl Rasteriser {
                         }
 
                         // Texturing
-                        let texture_data = tri.texture.as_ref().unwrap();
-                        let texture = &texture_data.texture;
-                        let texcoords = texture_data.points;
-                        let u = ((w0 * texcoords[2].x + w1 * texcoords[0].x + w2 * texcoords[1].x)
-                            * texture_data.width as f32) as usize;
-                        let v = ((w0 * texcoords[2].y + w1 * texcoords[0].y + w2 * texcoords[1].y)
-                            * texture_data.height as f32) as usize;
+                        let texture_data = tri.texture.as_ref();
+                        if let Some(texture_data) = texture_data {
+                            let texture = &texture_data.texture;
+                            let texcoords = texture_data.points;
+                            let u =
+                                ((w0 * texcoords[2].x + w1 * texcoords[0].x + w2 * texcoords[1].x)
+                                    * texture_data.width as f32)
+                                    as usize;
+                            let v =
+                                ((w0 * texcoords[2].y + w1 * texcoords[0].y + w2 * texcoords[1].y)
+                                    * texture_data.height as f32)
+                                    as usize;
 
-                        let idx = u * 4 + v * 4 * texture_data.width;
-                        // let idx = (texture_data.width * texture_data.height * 4)
-                        // -((texture_data.width * 4 - u * 4) + (v * 4 * (texture_data.width)));
-                        let mut tex_color = Color::new_from_rgb(
-                            texture[idx + 0],
-                            texture[idx + 1],
-                            texture[idx + 2],
-                        );
-                        // Texturing //
+                            let idx = u * 4 + v * 4 * texture_data.width;
+                            color = Color::new_from_rgb(
+                                texture[idx + 0],
+                                texture[idx + 1],
+                                texture[idx + 2],
+                            );
+                            // Texturing //
+                        }
                         //tex_color.modify_intensity(intensity);
-                        tex_color.modify_intensity(1.);
+                        color.modify_intensity(1.);
                         // Shading //
-                        //
+
                         // TODOS:
                         // -> learn about rc and lifetimes
 
                         let zdepth = w0 * tri.position[2].z
                             + w1 * tri.position[0].z
                             + w2 * tri.position[1].z;
+
+                        //TODO: fix
+                        /*
+                        if zdepth < 0. || zdepth > 1. {
+                            return;
+                        }
+                        */
+
                         let coord = self.calculate_coord(x as usize, y as usize);
-                        // +z is towards us
-                        // TODO: render zbuffer
-                        if zdepth > self.zbuffer[coord] {
+                        // +z is towards us, however the cgmath::projection matrix transforms
+                        // visible points into the 0. to 1. region, where smaller numbers are closer
+                        // to the camera
+                        if zdepth < self.zbuffer[coord] {
                             self.zbuffer[coord] = zdepth;
-                            self.draw_pixel(coord, tex_color.get_pixel_color());
+                            self.draw_pixel(coord, color.get_pixel_color());
+
+                            // render zbuffer
+                            /*
+                            let zdepth_color = 1. - zdepth; //TODO: map this onto some curve for
+                            //better visibility
+                            self.draw_pixel(
+                                coord,
+                                Color::new(zdepth_color, zdepth_color, zdepth_color)
+                                    .get_pixel_color(),
+                            );
+                            */
                         }
                     }
                 }

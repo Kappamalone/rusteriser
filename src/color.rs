@@ -8,7 +8,7 @@ pub struct Color {
 
 impl Color {
     pub fn new(r: f32, g: f32, b: f32) -> Color {
-        debug_assert!(r >= 0. && r <= 1. && g >= 0. && g <= 1. && b >= 0. && b <= 1.);
+        assert!(r >= 0. && r <= 1. && g >= 0. && g <= 1. && b >= 0. && b <= 1.);
         Color { r, g, b }
     }
 

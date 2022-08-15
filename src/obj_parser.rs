@@ -1,3 +1,4 @@
+use crate::MtlData;
 use cgmath::point3;
 use cgmath::vec3;
 use cgmath::InnerSpace;
@@ -13,6 +14,7 @@ use std::rc::Rc;
 #[derive(Clone)]
 struct CurrentTextureData(Rc<Vec<u8>>, usize, usize);
 
+// TODO: restructure everything to use flattened arrays
 // Holds all the data needed to interpolate inside a texture,
 #[derive(Clone)]
 pub struct TextureData {
@@ -22,6 +24,7 @@ pub struct TextureData {
     pub points: [Point3<f32>; 3],
 }
 
+//TODO: figure out how like, specular textures and stuff work
 impl TextureData {
     fn new(
         texture: Rc<Vec<u8>>,
@@ -45,6 +48,7 @@ pub struct ObjData {
     pub tri_positions: Vec<[Point3<f32>; 3]>,
     pub tri_textures: Option<Vec<TextureData>>,
     pub tri_normals: Option<Vec<[Vector3<f32>; 3]>>,
+    pub mtl: Option<MtlData>,
     textures: Vec<Rc<Vec<u8>>>,
 }
 
@@ -67,19 +71,32 @@ impl ObjData {
         let mut tri_textures: Option<Vec<TextureData>> = Some(Vec::new());
         let mut current_texture_info: Option<CurrentTextureData> = None;
         let mut textures: Vec<Rc<Vec<u8>>> = Vec::new();
+        let mut mtl: Option<MtlData> = None;
 
         let file = File::open(obj_path).unwrap();
         let reader = BufReader::new(file);
+        let obj_dir = Path::new(obj_path).parent().unwrap().to_str().unwrap();
 
         for line in reader.lines() {
             let line = line.unwrap();
-            if let Some(id) = line.chars().nth(0) {
+            if line == "" {
+                continue;
+            }
+            let elements = line.split_whitespace().collect::<Vec<&str>>();
+            let id = elements[0];
+            {
                 match id {
-                    'u' => {
-                        // usemtl
-                        let texture = line.split_whitespace().collect::<Vec<&str>>()[1];
-                        let obj_dir = Path::new(obj_path).parent().unwrap().to_str().unwrap();
-                        let texture_path = Path::new(".").join(obj_dir).join(texture);
+                    "mtllib" => {
+                        //TODO
+                        let mtl_name = elements[1];
+                        let mtl_path = Path::new(obj_dir).join(mtl_name);
+                        println!("Loaded .mtl file: {:?}", mtl_path);
+                        mtl = Some(MtlData::new(mtl_path.to_str().unwrap()));
+                    }
+                    "usemtl" => {
+                        //TODO: change this back
+                        let texture_name = &mtl.as_ref().unwrap().texture_path_map[elements[1]];
+                        let texture_path = Path::new(obj_dir).join(texture_name);
                         let file_type = Path::new(&texture_path)
                             .extension()
                             .unwrap()
@@ -135,53 +152,49 @@ impl ObjData {
                             _ => panic!("unhandled texture file type!"),
                         }
                     }
-                    'v' => match line.chars().nth(1).unwrap() {
+                    "v" | "vt" | "vn" => match line.chars().nth(1).unwrap() {
                         ' ' => {
-                            let vertexes: Vec<&str> = line.split_whitespace().collect();
-                            temp_vertex_buffer.push(vertexes[1].parse::<f32>().unwrap());
-                            temp_vertex_buffer.push(vertexes[2].parse::<f32>().unwrap());
-                            temp_vertex_buffer.push(vertexes[3].parse::<f32>().unwrap());
+                            temp_vertex_buffer.push(elements[1].parse::<f32>().unwrap());
+                            temp_vertex_buffer.push(elements[2].parse::<f32>().unwrap());
+                            temp_vertex_buffer.push(elements[3].parse::<f32>().unwrap());
                         }
                         't' => {
                             //(u, [v, w]) coordinates, these will vary between 0 and 1.
                             // v, w are optional and default to 0.
-                            let vertexes: Vec<&str> = line.split_whitespace().collect();
-                            match vertexes.len() {
+                            match elements.len() {
                                 2 => {
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                        .push(elements[1].parse::<f32>().unwrap());
                                     temp_vertex_texture_buffer.push(0.);
                                     temp_vertex_texture_buffer.push(0.);
                                 }
                                 3 => {
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                        .push(elements[1].parse::<f32>().unwrap());
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[2].parse::<f32>().unwrap());
+                                        .push(elements[2].parse::<f32>().unwrap());
                                     temp_vertex_texture_buffer.push(0.);
                                 }
                                 4 => {
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[1].parse::<f32>().unwrap());
+                                        .push(elements[1].parse::<f32>().unwrap());
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[2].parse::<f32>().unwrap());
+                                        .push(elements[2].parse::<f32>().unwrap());
                                     temp_vertex_texture_buffer
-                                        .push(vertexes[3].parse::<f32>().unwrap());
+                                        .push(elements[3].parse::<f32>().unwrap());
                                 }
                                 _ => panic!("Error parsing vertex textures: {}", line),
                             }
                         }
                         'n' => {
-                            let vertexes: Vec<&str> = line.split_whitespace().collect();
-                            temp_vertex_normal_buffer.push(vertexes[1].parse::<f32>().unwrap());
-                            temp_vertex_normal_buffer.push(vertexes[2].parse::<f32>().unwrap());
-                            temp_vertex_normal_buffer.push(vertexes[3].parse::<f32>().unwrap());
+                            temp_vertex_normal_buffer.push(elements[1].parse::<f32>().unwrap());
+                            temp_vertex_normal_buffer.push(elements[2].parse::<f32>().unwrap());
+                            temp_vertex_normal_buffer.push(elements[3].parse::<f32>().unwrap());
                         }
                         _ => println!("Unhandled obj expression: {}", line),
                     },
-                    'f' => {
-                        let faces: Vec<&str> = line.split_whitespace().collect();
-                        let slash_frequency: usize = faces
+                    "f" => {
+                        let slash_frequency: usize = elements
                             .iter()
                             .map(|x| x.chars().filter(|y| *y == '/').count())
                             .sum();
@@ -196,14 +209,14 @@ impl ObjData {
                         let mut vn2: Option<usize> = None;
                         match slash_frequency {
                             0 => {
-                                v0 = faces[1].parse::<usize>().unwrap() - 1;
-                                v1 = faces[2].parse::<usize>().unwrap() - 1;
-                                v2 = faces[3].parse::<usize>().unwrap() - 1;
+                                v0 = elements[1].parse::<usize>().unwrap() - 1;
+                                v1 = elements[2].parse::<usize>().unwrap() - 1;
+                                v2 = elements[3].parse::<usize>().unwrap() - 1;
                             }
                             3 => {
-                                let group0 = faces[1].split('/').collect::<Vec<&str>>();
-                                let group1 = faces[2].split('/').collect::<Vec<&str>>();
-                                let group2 = faces[3].split('/').collect::<Vec<&str>>();
+                                let group0 = elements[1].split('/').collect::<Vec<&str>>();
+                                let group1 = elements[2].split('/').collect::<Vec<&str>>();
+                                let group2 = elements[3].split('/').collect::<Vec<&str>>();
                                 v0 = group0[0].parse::<usize>().unwrap() - 1;
                                 v1 = group1[0].parse::<usize>().unwrap() - 1;
                                 v2 = group2[0].parse::<usize>().unwrap() - 1;
@@ -213,9 +226,9 @@ impl ObjData {
                             }
                             6 => {
                                 // FIXME: breaks with v//vn format
-                                let group0 = faces[1].split('/').collect::<Vec<&str>>();
-                                let group1 = faces[2].split('/').collect::<Vec<&str>>();
-                                let group2 = faces[3].split('/').collect::<Vec<&str>>();
+                                let group0 = elements[1].split('/').collect::<Vec<&str>>();
+                                let group1 = elements[2].split('/').collect::<Vec<&str>>();
+                                let group2 = elements[3].split('/').collect::<Vec<&str>>();
                                 v0 = group0[0].parse::<usize>().unwrap() - 1;
                                 v1 = group1[0].parse::<usize>().unwrap() - 1;
                                 v2 = group2[0].parse::<usize>().unwrap() - 1;
@@ -303,21 +316,24 @@ impl ObjData {
                             tri_normals = None;
                         }
                     }
-                    '#' => println!(".obj file comment: {}", line),
-                    _ => println!("Unhandled obj expression: {}", line), // should panic!() instead
+                    "#" => println!(".obj file comment: {}", line),
+                    _ => println!("Unhandled .obj expression: {}", line), // should panic!() instead
                 }
             }
         }
 
+        /*
         assert!(
             tri_positions.len() == tri_textures.as_ref().unwrap().len(),
             "REMOVE ME"
         );
+        */
         ObjData {
             tri_positions,
             tri_textures,
             tri_normals,
             textures,
+            mtl,
         }
     }
 }
